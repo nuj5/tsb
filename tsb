@@ -1,0 +1,2497 @@
+-- ╔══════════════════════════════════════════════════╗
+-- ║  Onyx v7  —  Hub UI r8  |  credits: JustH0bo     ║
+-- ╚══════════════════════════════════════════════════╝
+
+local Players          = game:GetService("Players");
+local RunService       = game:GetService("RunService");
+local TweenService     = game:GetService("TweenService");
+local UserInputService = game:GetService("UserInputService");
+
+local lp = Players.LocalPlayer;
+
+-- ═══════════════════════════════════════
+-- TERMINATION GUARD
+-- ═══════════════════════════════════════
+local scriptId = math.random(1, 1000000);
+_G.OnyxId = scriptId;
+local function isCurrent() return _G.OnyxId == scriptId end;
+
+-- ═══════════════════════════════════════
+-- CONFIG  — defaults from screenshot
+-- ═══════════════════════════════════════
+local Config = {
+    Enabled           = true;
+    LethalEnabled     = true;
+    LethalAnim        = "rbxassetid://10503381238";
+    LethalDelay       = 0.55;
+    LethalJump        = 1;
+    LethalAccuracy    = 15;
+    LethalCancelDelay = 0.4;
+    LethalMode        = "V1";
+    CancelEnabled     = true;
+    CooldownActive    = true;
+    NoClipEnabled     = true;
+    DashRange         = 5;
+    TouchMode         = false;
+    CooldownAnims     = {
+        ["10491993682"] = true;
+        ["10479335397"] = true;
+        ["13380255751"] = true;
+    };
+};
+
+local isNoclipping = false;
+local isCooldown   = false;
+local isExecuting  = false;
+
+-- forward refs needed by cooldown functions
+local CooldownBar, CooldownFill, stsTxt;
+
+-- forward refs for the rage controller (assigned further down; terminate() stops it)
+local startRage, stopRage;
+
+-- UI-only state
+local uiConns   = {};     -- disconnected on terminate
+local minimized = false;
+local uiToggleKey = Enum.KeyCode.RightAlt;   -- hide / show key (rebindable in Settings)
+
+-- ═══════════════════════════════════════
+-- COLOURS / THEMES
+-- ═══════════════════════════════════════
+local WHITE     = Color3.fromRGB(255, 255, 255);
+local BLUE      = Color3.fromRGB(59, 130, 246);
+local BLUE_DARK = Color3.fromRGB(30,  64, 175);
+local CYAN      = Color3.fromRGB(56, 189, 248);
+local STS_BG    = Color3.fromRGB(10,  30,  90);
+
+local COL_OK    = Color3.fromRGB(80,  255, 120);
+local COL_WARN  = Color3.fromRGB(255, 200,  60);
+local COL_BAD   = Color3.fromRGB(255,  80,  80);
+
+local THEMES = {
+    light = {
+        winA = Color3.fromRGB(250, 253, 255);
+        winB = Color3.fromRGB(196, 222, 255);
+        winC = Color3.fromRGB(138, 182, 255);
+        sideA = Color3.fromRGB(29,  78, 216);
+        sideB = Color3.fromRGB(96, 165, 250);
+        cardA = Color3.fromRGB(255, 255, 255);
+        cardB = Color3.fromRGB(226, 238, 255);
+        cardT = 0.10;
+        line  = Color3.fromRGB(196, 216, 248);
+        row   = Color3.fromRGB(236, 243, 255);
+        ink   = Color3.fromRGB(15,  35,  75);
+        dim   = Color3.fromRGB(84, 108, 150);
+        swOff = Color3.fromRGB(184, 198, 222);
+        input    = Color3.fromRGB(255, 255, 255);
+        inputTxt = Color3.fromRGB(30,  64, 175);
+        segBg    = Color3.fromRGB(212, 226, 250);
+        titleA   = Color3.fromRGB(30,  64, 175);
+        titleB   = Color3.fromRGB(56, 189, 248);
+        navOn    = Color3.fromRGB(255, 255, 255);
+        navOnTxt = Color3.fromRGB(30,  64, 175);
+        winStroke   = Color3.fromRGB(255, 255, 255);
+        snow        = Color3.fromRGB(255, 255, 255);
+        snowStroke  = Color3.fromRGB(150, 185, 240);
+        snowStrokeT = 0.3;
+        stars       = 0;
+    };
+    -- dark: mid-tone navy (not near-black) with bright text
+    dark = {
+        winA = Color3.fromRGB(30,  46,  86);
+        winB = Color3.fromRGB(38,  60, 108);
+        winC = Color3.fromRGB(48,  78, 134);
+        sideA = Color3.fromRGB(22,  38,  80);
+        sideB = Color3.fromRGB(42,  74, 138);
+        cardA = Color3.fromRGB(50,  76, 128);
+        cardB = Color3.fromRGB(40,  64, 110);
+        cardT = 0.04;
+        line  = Color3.fromRGB(92, 126, 190);
+        row   = Color3.fromRGB(62,  92, 150);
+        ink   = Color3.fromRGB(242, 247, 255);
+        dim   = Color3.fromRGB(184, 204, 238);
+        swOff = Color3.fromRGB(88, 112, 156);
+        input    = Color3.fromRGB(32,  52,  98);
+        inputTxt = Color3.fromRGB(176, 216, 255);
+        segBg    = Color3.fromRGB(32,  52,  98);
+        titleA   = Color3.fromRGB(140, 190, 255);
+        titleB   = Color3.fromRGB(140, 228, 255);
+        navOn    = Color3.fromRGB(64, 112, 204);
+        navOnTxt = Color3.fromRGB(255, 255, 255);
+        winStroke   = Color3.fromRGB(96, 140, 214);
+        snow        = Color3.fromRGB(240, 246, 255);
+        snowStroke  = Color3.fromRGB(240, 246, 255);
+        snowStrokeT = 1;
+        stars       = 1;
+    };
+};
+
+-- ── extra themes (accent token recolors toggles / selections per theme) ──
+THEMES.light.accent = BLUE;
+THEMES.dark.accent  = BLUE;
+
+THEMES.winter = {
+    winA = Color3.fromRGB(246, 251, 253); winB = Color3.fromRGB(210, 232, 242); winC = Color3.fromRGB(164, 200, 222);
+    sideA = Color3.fromRGB(18, 66, 98);   sideB = Color3.fromRGB(56, 128, 168);
+    cardA = Color3.fromRGB(255, 255, 255); cardB = Color3.fromRGB(228, 242, 249); cardT = 0.08;
+    line = Color3.fromRGB(190, 216, 230); row = Color3.fromRGB(232, 243, 249);
+    ink = Color3.fromRGB(14, 40, 58);     dim = Color3.fromRGB(70, 100, 122);
+    swOff = Color3.fromRGB(176, 196, 208);
+    input = Color3.fromRGB(255, 255, 255); inputTxt = Color3.fromRGB(18, 66, 98);
+    segBg = Color3.fromRGB(206, 226, 236);
+    titleA = Color3.fromRGB(18, 86, 128); titleB = Color3.fromRGB(40, 150, 190);
+    navOn = Color3.fromRGB(255, 255, 255); navOnTxt = Color3.fromRGB(18, 66, 98);
+    winStroke = Color3.fromRGB(255, 255, 255);
+    snow = Color3.fromRGB(255, 255, 255); snowStroke = Color3.fromRGB(140, 180, 205); snowStrokeT = 0.3;
+    stars = 0; accent = Color3.fromRGB(32, 120, 168);
+};
+
+-- mono: mid greys, never near-black
+THEMES.mono = {
+    winA = Color3.fromRGB(30, 30, 32);    winB = Color3.fromRGB(42, 42, 46);   winC = Color3.fromRGB(56, 56, 60);
+    sideA = Color3.fromRGB(22, 22, 24);   sideB = Color3.fromRGB(54, 54, 58);
+    cardA = Color3.fromRGB(62, 62, 66);   cardB = Color3.fromRGB(48, 48, 52);  cardT = 0.04;
+    line = Color3.fromRGB(104, 104, 110); row = Color3.fromRGB(76, 76, 82);
+    ink = Color3.fromRGB(250, 250, 250);  dim = Color3.fromRGB(192, 192, 198);
+    swOff = Color3.fromRGB(70, 70, 76);
+    input = Color3.fromRGB(36, 36, 40);   inputTxt = Color3.fromRGB(240, 240, 240);
+    segBg = Color3.fromRGB(36, 36, 40);
+    titleA = Color3.fromRGB(255, 255, 255); titleB = Color3.fromRGB(190, 190, 196);
+    navOn = Color3.fromRGB(240, 240, 244); navOnTxt = Color3.fromRGB(20, 20, 22);
+    winStroke = Color3.fromRGB(140, 140, 146);
+    snow = Color3.fromRGB(255, 255, 255); snowStroke = Color3.fromRGB(255, 255, 255); snowStrokeT = 1;
+    stars = 1; accent = Color3.fromRGB(118, 118, 126);
+};
+
+THEMES.autumn = {
+    winA = Color3.fromRGB(255, 248, 238); winB = Color3.fromRGB(252, 224, 190); winC = Color3.fromRGB(236, 178, 122);
+    sideA = Color3.fromRGB(110, 38, 16);  sideB = Color3.fromRGB(186, 84, 28);
+    cardA = Color3.fromRGB(255, 252, 246); cardB = Color3.fromRGB(253, 236, 214); cardT = 0.08;
+    line = Color3.fromRGB(232, 200, 164); row = Color3.fromRGB(252, 240, 224);
+    ink = Color3.fromRGB(62, 28, 12);     dim = Color3.fromRGB(124, 84, 54);
+    swOff = Color3.fromRGB(214, 190, 164);
+    input = Color3.fromRGB(255, 255, 255); inputTxt = Color3.fromRGB(140, 56, 16);
+    segBg = Color3.fromRGB(246, 222, 192);
+    titleA = Color3.fromRGB(160, 58, 14); titleB = Color3.fromRGB(214, 118, 24);
+    navOn = Color3.fromRGB(255, 250, 242); navOnTxt = Color3.fromRGB(120, 44, 14);
+    winStroke = Color3.fromRGB(255, 236, 208);
+    snow = Color3.fromRGB(232, 128, 36);  snowStroke = Color3.fromRGB(150, 64, 16); snowStrokeT = 0.55;
+    stars = 0; accent = Color3.fromRGB(190, 84, 24);
+};
+
+THEMES.sakura = {
+    winA = Color3.fromRGB(255, 248, 251); winB = Color3.fromRGB(254, 226, 238); winC = Color3.fromRGB(248, 190, 214);
+    sideA = Color3.fromRGB(158, 38, 92);  sideB = Color3.fromRGB(212, 82, 134);
+    cardA = Color3.fromRGB(255, 255, 255); cardB = Color3.fromRGB(254, 234, 243); cardT = 0.08;
+    line = Color3.fromRGB(244, 200, 220); row = Color3.fromRGB(254, 238, 246);
+    ink = Color3.fromRGB(72, 20, 48);     dim = Color3.fromRGB(138, 78, 108);
+    swOff = Color3.fromRGB(224, 196, 210);
+    input = Color3.fromRGB(255, 255, 255); inputTxt = Color3.fromRGB(150, 34, 88);
+    segBg = Color3.fromRGB(250, 216, 230);
+    titleA = Color3.fromRGB(176, 36, 100); titleB = Color3.fromRGB(232, 96, 150);
+    navOn = Color3.fromRGB(255, 255, 255); navOnTxt = Color3.fromRGB(150, 34, 88);
+    winStroke = Color3.fromRGB(255, 255, 255);
+    snow = Color3.fromRGB(255, 196, 218); snowStroke = Color3.fromRGB(226, 110, 155); snowStrokeT = 0.3;
+    stars = 0; accent = Color3.fromRGB(198, 58, 118);
+};
+
+-- forest: mid-tone greens with bright text
+THEMES.forest = {
+    winA = Color3.fromRGB(20, 52, 42);    winB = Color3.fromRGB(28, 68, 54);   winC = Color3.fromRGB(38, 88, 68);
+    sideA = Color3.fromRGB(16, 48, 38);   sideB = Color3.fromRGB(34, 110, 78);
+    cardA = Color3.fromRGB(40, 92, 72);   cardB = Color3.fromRGB(30, 76, 58);  cardT = 0.04;
+    line = Color3.fromRGB(70, 138, 108);  row = Color3.fromRGB(50, 108, 84);
+    ink = Color3.fromRGB(236, 252, 244);  dim = Color3.fromRGB(172, 214, 194);
+    swOff = Color3.fromRGB(84, 124, 106);
+    input = Color3.fromRGB(24, 64, 50);   inputTxt = Color3.fromRGB(176, 246, 208);
+    segBg = Color3.fromRGB(24, 64, 50);
+    titleA = Color3.fromRGB(130, 236, 176); titleB = Color3.fromRGB(200, 252, 140);
+    navOn = Color3.fromRGB(46, 140, 100); navOnTxt = Color3.fromRGB(255, 255, 255);
+    winStroke = Color3.fromRGB(84, 160, 124);
+    snow = Color3.fromRGB(210, 255, 180); snowStroke = Color3.fromRGB(210, 255, 180); snowStrokeT = 1;
+    stars = 1; accent = Color3.fromRGB(46, 160, 108);
+};
+
+-- default theme is Winter
+local cur = {};
+for k, v in pairs(THEMES.winter) do cur[k] = v end;
+
+-- ═══════════════════════════════════════
+-- LAYOUT CONSTANTS
+-- ═══════════════════════════════════════
+local W      = 580;   -- window width
+local H      = 380;   -- window height
+local SIDE   = 150;   -- sidebar width
+local TOP    = 44;    -- top bar height
+local RAD    = 14;    -- window corner radius
+local CARD_W = 195;
+local CARD_H = 308;
+
+-- ═══════════════════════════════════════
+-- HELPERS
+-- ═══════════════════════════════════════
+local function getId(str)
+    return tostring(str):match("%d+");
+end;
+
+local function setStatus(txt, col)
+    if not stsTxt then return end;
+    stsTxt.Text       = txt;
+    stsTxt.TextColor3 = col or COL_OK;
+end;
+
+local function clip()
+    isNoclipping = false;
+    local char = lp.Character;
+    if not char then return end;
+    local hum = char:FindFirstChild("Humanoid");
+    if hum then hum.AutoRotate = true end;
+end;
+
+local function forceCancel()
+    clip();
+    local char = lp.Character;
+    local hrp  = char and char:FindFirstChild("HumanoidRootPart");
+    if not hrp then return end;
+    for _, obj in pairs(hrp:GetChildren()) do
+        if obj:IsA("BodyVelocity") or obj:IsA("LinearVelocity")
+        or obj:IsA("Attachment")   or obj:IsA("BodyAngularVelocity") then
+            obj:Destroy();
+        end;
+    end;
+    hrp.AssemblyLinearVelocity = Vector3.zero;
+end;
+
+local function fireDash()
+    local char = lp.Character;
+    if not char then return end;
+    local ev = char:FindFirstChild("Communicate");
+    if ev then
+        ev:FireServer({ Dash = Enum.KeyCode.W; Key = Enum.KeyCode.Q; Goal = "KeyPress" });
+    end;
+end;
+
+-- ═══════════════════════════════════════
+-- COOLDOWN  (its loop only exists while a cooldown is running)
+-- ═══════════════════════════════════════
+local function startCooldown(duration)
+    if not isCurrent() or isCooldown then return end;
+    isCooldown = true;
+
+    if CooldownBar and CooldownFill then
+        CooldownBar.Visible = true;
+        CooldownFill.Size   = UDim2.new(1, 0, 1, 0);
+        TweenService:Create(
+            CooldownFill,
+            TweenInfo.new(duration, Enum.EasingStyle.Linear),
+            { Size = UDim2.new(0, 0, 1, 0) }
+        ):Play();
+    end;
+
+    local rem = duration;
+    task.spawn(function()
+        while rem > 0 and isCooldown and isCurrent() do
+            task.wait(0.5);
+            rem = math.max(0, rem - 0.5);
+            setStatus(string.format("COOLDOWN  %.1fs", rem), COL_BAD);
+        end;
+        if isCurrent() then
+            isCooldown = false;
+            if CooldownBar then CooldownBar.Visible = false end;
+            setStatus("READY", COL_OK);
+        end;
+    end);
+    setStatus(string.format("COOLDOWN  %.1fs", rem), COL_BAD);
+end;
+
+-- ═══════════════════════════════════════
+-- NOCLIP  (the per-frame loop only exists while a lethal is running)
+-- ═══════════════════════════════════════
+local noclipConn;
+local function startNoclip()
+    if noclipConn then return end;
+    noclipConn = RunService.Stepped:Connect(function()
+        if not isCurrent() or not isNoclipping then
+            if noclipConn then noclipConn:Disconnect(); noclipConn = nil end;
+            return;
+        end;
+        if not Config.NoClipEnabled then return end;
+        if not lp.Character then return end;
+        for _, model in pairs(workspace:GetChildren()) do
+            if model:IsA("Model") and model ~= lp.Character
+            and model:FindFirstChildOfClass("Humanoid") then
+                for _, part in pairs(model:GetDescendants()) do
+                    if part:IsA("BasePart") and part.CanCollide then
+                        part.CanCollide = false;
+                    end;
+                end;
+            end;
+        end;
+    end);
+end;
+
+-- ═══════════════════════════════════════
+-- TARGET FINDER
+-- ═══════════════════════════════════════
+local function getTorsoTarget()
+    local char = lp.Character;
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end;
+
+    local params = OverlapParams.new();
+    params.FilterType = Enum.RaycastFilterType.Exclude;
+    params.FilterDescendantsInstances = { char };
+
+    local parts  = workspace:GetPartBoundsInRadius(char.HumanoidRootPart.Position, Config.DashRange, params);
+    local target, dist = nil, Config.DashRange;
+
+    for _, part in pairs(parts) do
+        local model = part:FindFirstAncestorOfClass("Model");
+        if model and model:FindFirstChild("Humanoid") and model ~= char then
+            local torso = model:FindFirstChild("Torso")
+                       or model:FindFirstChild("UpperTorso")
+                       or model:FindFirstChild("HumanoidRootPart");
+            if torso then
+                local d = (char.HumanoidRootPart.Position - torso.Position).Magnitude;
+                if d < dist then dist = d; target = torso end;
+            end;
+        end;
+    end;
+    return target;
+end;
+
+-- ═══════════════════════════════════════
+-- EXECUTE LETHAL
+-- ═══════════════════════════════════════
+local function executeLethal()
+    if not isCurrent() or isExecuting or isCooldown then return end;
+    if not Config.Enabled or not Config.LethalEnabled then return end;
+
+    local char = lp.Character;
+    local root = char and char:FindFirstChild("HumanoidRootPart");
+    local hum  = char and char:FindFirstChild("Humanoid");
+    if not root or not hum then return end;
+
+    local torso = getTorsoTarget();
+    if not torso then clip(); return end;
+
+    isExecuting = true;
+    setStatus("EXECUTING...", COL_WARN);
+
+    if not Config.TouchMode then task.wait(Config.LethalDelay) end;
+    if not isCurrent() then isExecuting = false; return end;
+
+    root.AssemblyLinearVelocity = Vector3.new(
+        root.AssemblyLinearVelocity.X,
+        Config.LethalJump * 10,
+        root.AssemblyLinearVelocity.Z
+    );
+    isNoclipping = true;
+    startNoclip();
+    fireDash();
+
+    local startT     = tick();
+    local flipped    = false;
+    local forwardDir = (torso.Position - root.Position).Unit;
+    local sideVec    = Vector3.new(-forwardDir.Z, 0, forwardDir.X);
+    local bav        = nil;
+
+    if Config.LethalMode == "V1" then
+        bav           = Instance.new("BodyAngularVelocity");
+        bav.MaxTorque = Vector3.new(0, 1000000, 0);
+        bav.P         = 15000;
+        bav.Parent    = root;
+    end;
+
+    local conn;
+    conn = RunService.Heartbeat:Connect(function()
+        if not isCurrent() or not torso or not torso.Parent
+        or not root or not root.Parent then
+            if bav then bav:Destroy() end;
+            clip();
+            isExecuting = false;
+            conn:Disconnect();
+            return;
+        end;
+
+        local elapsed  = tick() - startT;
+        local torsoPos = torso.Position;
+        local rootPos  = root.Position;
+        hum.AutoRotate = false;
+
+        if Config.LethalMode == "V1" then
+            local angle         = (elapsed / 0.45) * (math.pi / 1.5);
+            local radius        = Config.LethalAccuracy * (1 - math.clamp(elapsed / 0.45, 0, 1));
+            local lookTarget    = torsoPos + (sideVec * math.cos(angle) + forwardDir * math.sin(angle)) * radius;
+            local lookCF        = CFrame.lookAt(rootPos, Vector3.new(lookTarget.X, rootPos.Y, lookTarget.Z));
+            local rel           = root.CFrame:Inverse() * lookCF;
+            local _, y, _       = rel:ToEulerAnglesXYZ();
+            if bav and bav.Parent then bav.AngularVelocity = Vector3.new(0, y * 30, 0) end;
+        else
+            if elapsed >= Config.LethalAccuracy and not flipped then
+                root.CFrame = root.CFrame * CFrame.Angles(0, math.pi, 0);
+                flipped = true;
+            end;
+        end;
+
+        local dXZ = (Vector2.new(rootPos.X, rootPos.Z) - Vector2.new(torsoPos.X, torsoPos.Z)).Magnitude;
+        if Config.CancelEnabled and elapsed > Config.LethalCancelDelay and dXZ < 2.2 then
+            if bav then bav:Destroy() end;
+            forceCancel();
+            isExecuting = false;
+            conn:Disconnect();
+            return;
+        end;
+
+        if not Config.Enabled or elapsed > 1.5 then
+            if bav then bav:Destroy() end;
+            clip();
+            isExecuting = false;
+            conn:Disconnect();
+        end;
+    end);
+end;
+
+-- ═══════════════════════════════════════
+-- TERMINATE
+-- ═══════════════════════════════════════
+local function terminate()
+    _G.OnyxId = nil;
+    if stopRage then pcall(stopRage) end;
+    forceCancel();
+    for _, c in ipairs(uiConns) do
+        pcall(function() c:Disconnect() end);
+    end;
+    if getgenv and getgenv().OnyxGui then
+        pcall(function() getgenv().OnyxGui:Destroy() end);
+        getgenv().OnyxGui = nil;
+    end;
+end;
+
+-- destroy previous instance
+if getgenv and getgenv().OnyxGui then
+    pcall(function() getgenv().OnyxGui:Destroy() end);
+end;
+
+-- ═══════════════════════════════════════
+-- UI BUILDERS
+-- ═══════════════════════════════════════
+local function make(class, props, parent)
+    local inst = Instance.new(class);
+    for k, v in pairs(props) do inst[k] = v end;
+    if parent then inst.Parent = parent end;
+    return inst;
+end;
+
+local function corner(inst, r)
+    local c = Instance.new("UICorner");
+    c.CornerRadius = UDim.new(0, r);
+    c.Parent = inst;
+    return c;
+end;
+
+local function stroke(inst, col, th, tr)
+    local s = Instance.new("UIStroke");
+    s.Color           = col;
+    s.Thickness       = th or 1;
+    s.Transparency    = tr or 0;
+    s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border;
+    s.Parent          = inst;
+    return s;
+end;
+
+-- ── theme engine ───────────────────────
+local bindings, gradBindings, refreshers = {}, {}, {};
+
+local function bind(inst, prop, token)
+    inst[prop] = cur[token];
+    table.insert(bindings, { inst, prop, token });
+end;
+
+local function seqOf(tokens)
+    local n, kp = #tokens, {};
+    for i, tk in ipairs(tokens) do
+        kp[i] = ColorSequenceKeypoint.new((i - 1) / (n - 1), cur[tk]);
+    end;
+    return ColorSequence.new(kp);
+end;
+
+-- gradient whose colour stops follow theme tokens
+local function themedGradient(inst, tokens, rot)
+    local g = Instance.new("UIGradient");
+    g.Rotation = rot or 0;
+    g.Color    = seqOf(tokens);
+    g.Parent   = inst;
+    table.insert(gradBindings, { g, tokens });
+    return g;
+end;
+
+local function applyCur()
+    for _, b in ipairs(bindings) do b[1][b[2]] = cur[b[3]] end;
+    for _, g in ipairs(gradBindings) do g[1].Color = seqOf(g[2]) end;
+    for _, r in ipairs(refreshers) do r() end;
+end;
+
+local function lerpVal(a, b, t)
+    if typeof(a) == "Color3" then return a:Lerp(b, t) end;
+    return a + (b - a) * t;
+end;
+
+local themeGen = 0;
+local function setTheme(name)
+    themeGen += 1;
+    local gen  = themeGen;
+    local from = {};
+    for k, v in pairs(cur) do from[k] = v end;
+    local to = THEMES[name];
+    local t0 = tick();
+    task.spawn(function()
+        while isCurrent() and gen == themeGen do
+            local a = math.clamp((tick() - t0) / 0.35, 0, 1);
+            local e = a * a * (3 - 2 * a);
+            for k, tv in pairs(to) do cur[k] = lerpVal(from[k], tv, e) end;
+            applyCur();
+            if a >= 1 then break end;
+            RunService.Heartbeat:Wait();
+        end;
+    end);
+end;
+
+local function makeDraggable(handle, frame)
+    local dragging, dragStart, startPos = false, nil, nil;
+    table.insert(uiConns, handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging  = true;
+            dragStart = input.Position;
+            startPos  = frame.Position;
+            local c; c = input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false;
+                    c:Disconnect();
+                end;
+            end);
+        end;
+    end));
+    table.insert(uiConns, UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch) then
+            local d = input.Position - dragStart;
+            frame.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + d.X,
+                startPos.Y.Scale, startPos.Y.Offset + d.Y
+            );
+        end;
+    end));
+end;
+
+-- ── snowfall + stars ───────────────────
+local flakes, starList = {}, {};
+
+-- layer is inset so nothing is ever drawn outside the rounded window
+local function makeSky(parent, x, y, w, h, nSnow, nStars)
+    local layer = make("Frame", {
+        Name                   = "Sky";
+        Position               = UDim2.fromOffset(x, y);
+        Size                   = UDim2.fromOffset(w, h);
+        BackgroundTransparency = 1;
+        BorderSizePixel        = 0;
+        ClipsDescendants       = true;
+    }, parent);
+
+    for _ = 1, nStars do
+        local sz = math.random(1, 2);
+        local s = make("Frame", {
+            Size                   = UDim2.fromOffset(sz, sz);
+            Position               = UDim2.fromOffset(math.random() * w, math.random() * h * 0.85);
+            BackgroundColor3       = WHITE;
+            BackgroundTransparency = 1;
+            BorderSizePixel        = 0;
+        }, layer);
+        corner(s, 2);
+        table.insert(starList, { inst = s, phase = math.random() * 6.28, speed = 0.8 + math.random() * 1.8 });
+    end;
+
+    for _ = 1, nSnow do
+        local sz = math.random(2, 4);
+        local f = make("Frame", {
+            Size                   = UDim2.fromOffset(sz, sz);
+            BackgroundTransparency = 0.1 + math.random() * 0.3;
+            BorderSizePixel        = 0;
+        }, layer);
+        corner(f, sz);
+        bind(f, "BackgroundColor3", "snow");
+        local st = stroke(f, cur.snowStroke, 1, cur.snowStrokeT);
+        bind(st, "Color", "snowStroke");
+        bind(st, "Transparency", "snowStrokeT");
+        table.insert(flakes, {
+            inst  = f;
+            size  = sz;
+            w     = w;
+            h     = h;
+            x     = math.random() * w;
+            y     = math.random() * h;
+            vy    = 14 + sz * 7 + math.random() * 8;
+            amp   = 4 + math.random() * 10;
+            freq  = 0.6 + math.random() * 1.2;
+            phase = math.random() * 6.28;
+        });
+    end;
+    return layer;
+end;
+
+-- ═══════════════════════════════════════
+-- SCREEN GUI
+-- ═══════════════════════════════════════
+local ScreenGui = make("ScreenGui", {
+    Name           = "OnyxGui";
+    ResetOnSpawn   = false;
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling;
+    IgnoreGuiInset = true;
+}, lp:WaitForChild("PlayerGui"));
+if getgenv then getgenv().OnyxGui = ScreenGui end;
+
+-- ═══════════════════════════════════════
+-- MAIN FRAME
+-- A UIGradient placed directly on a CanvasGroup multiplies EVERYTHING the group draws
+-- (text, cards, buttons), which is what made the dark themes look tinted and unreadable.
+-- So the window gradient lives on a plain background frame inside the group instead.
+-- ═══════════════════════════════════════
+local MainFrame = make("CanvasGroup", {
+    Name                   = "Window";
+    Size                   = UDim2.fromOffset(W, H);
+    Position               = UDim2.new(0.5, -W / 2, 0.5, -H / 2);
+    BackgroundColor3       = WHITE;
+    BackgroundTransparency = 1;
+    BorderSizePixel        = 0;
+    Active                 = true;
+}, ScreenGui);
+corner(MainFrame, RAD);
+
+local WinBg = make("Frame", {
+    Name             = "Bg";
+    Size             = UDim2.fromScale(1, 1);
+    BackgroundColor3 = WHITE;
+    BorderSizePixel  = 0;
+}, MainFrame);
+themedGradient(WinBg, { "winA", "winB", "winC" }, 125);
+
+local winStroke = stroke(MainFrame, cur.winStroke, 1.5, 0.2);
+bind(winStroke, "Color", "winStroke");
+
+-- ── hide / show animation (fade + shrink toward the window centre) ──
+local uiScale = Instance.new("UIScale");
+uiScale.Scale  = 1;
+uiScale.Parent = MainFrame;
+
+local shown, animating, animGen = true, false, 0;
+local restPos = MainFrame.Position;
+local introDone = false;   -- hide key is ignored until the opening animation has finished
+
+local function setShown(show)
+    if show == shown then return end;
+    shown = show;
+    animGen += 1;
+    local gen = animGen;
+    if not animating then restPos = MainFrame.Position end;
+    animating = true;
+
+    local sx = minimized and 270 or W;
+    local sy = minimized and TOP or H;
+    local fromS, fromT = uiScale.Scale, MainFrame.GroupTransparency;
+    local toS,   toT   = show and 1 or 0.9, show and 0 or 1;
+    local dur = show and 0.28 or 0.2;
+    local t0  = tick();
+    if show then MainFrame.Visible = true end;
+
+    task.spawn(function()
+        while isCurrent() and gen == animGen do
+            local a = math.clamp((tick() - t0) / dur, 0, 1);
+            local e = show and (1 - (1 - a) ^ 3) or (a * a);
+            local sc = fromS + (toS - fromS) * e;
+            uiScale.Scale = sc;
+            MainFrame.GroupTransparency = fromT + (toT - fromT) * e;
+            MainFrame.Position = UDim2.new(
+                restPos.X.Scale, restPos.X.Offset + (1 - sc) * sx / 2,
+                restPos.Y.Scale, restPos.Y.Offset + (1 - sc) * sy / 2
+            );
+            if a >= 1 then
+                animating = false;
+                MainFrame.Position = restPos;
+                if not show then MainFrame.Visible = false end;
+                break;
+            end;
+            RunService.Heartbeat:Wait();
+        end;
+    end);
+end;
+
+-- main-area sky (behind pages); inset so it stays inside the rounded corners
+makeSky(MainFrame, SIDE, 6, W - SIDE - 6, H - 12, 26, 30);
+
+-- ═══════════════════════════════════════
+-- SIDEBAR  (own rounded corners; right edge squared by a filler)
+-- ═══════════════════════════════════════
+local Side = make("Frame", {
+    Name             = "Sidebar";
+    Size             = UDim2.new(0, SIDE, 1, 0);
+    BackgroundColor3 = WHITE;
+    BorderSizePixel  = 0;
+}, MainFrame);
+corner(Side, RAD);
+themedGradient(Side, { "sideA", "sideB" }, 90);
+
+local SideFill = make("Frame", {
+    Size             = UDim2.new(0, RAD, 1, 0);
+    Position         = UDim2.new(1, -RAD, 0, 0);
+    BackgroundColor3 = WHITE;
+    BorderSizePixel  = 0;
+}, Side);
+themedGradient(SideFill, { "sideA", "sideB" }, 90);
+
+-- sidebar sky is the first real child above the filler, below all controls
+makeSky(Side, 6, 6, SIDE - 6, H - 12, 12, 14);
+
+local Logo = make("Frame", {
+    Size             = UDim2.fromOffset(34, 34);
+    Position         = UDim2.fromOffset(14, 14);
+    BackgroundColor3 = WHITE;
+    BorderSizePixel  = 0;
+}, Side);
+corner(Logo, 17);
+make("TextLabel", {
+    Size                   = UDim2.fromScale(1, 1);
+    BackgroundTransparency = 1;
+    Text                   = "O";
+    TextColor3             = BLUE_DARK;
+    Font                   = Enum.Font.GothamBlack;
+    TextSize               = 20;
+}, Logo);
+
+make("TextLabel", {
+    Size                   = UDim2.fromOffset(88, 18);
+    Position               = UDim2.fromOffset(56, 14);
+    BackgroundTransparency = 1;
+    Text                   = "Onyx Hub";
+    TextColor3             = WHITE;
+    Font                   = Enum.Font.GothamBold;
+    TextSize               = 15;
+    TextXAlignment         = Enum.TextXAlignment.Left;
+}, Side);
+make("TextLabel", {
+    Size                   = UDim2.fromOffset(88, 14);
+    Position               = UDim2.fromOffset(56, 31);
+    BackgroundTransparency = 1;
+    Text                   = "v7  ·  by JustH0bo";
+    TextColor3             = Color3.fromRGB(214, 230, 255);
+    Font                   = Enum.Font.Gotham;
+    TextSize               = 10;
+    TextXAlignment         = Enum.TextXAlignment.Left;
+}, Side);
+
+make("TextLabel", {
+    Size                   = UDim2.fromOffset(SIDE - 24, 14);
+    Position               = UDim2.fromOffset(14, 74);
+    BackgroundTransparency = 1;
+    Text                   = "MENU";
+    TextColor3             = Color3.fromRGB(200, 222, 255);
+    Font                   = Enum.Font.GothamBold;
+    TextSize               = 10;
+    TextXAlignment         = Enum.TextXAlignment.Left;
+}, Side);
+
+-- user card (bottom of sidebar)
+local UserCard = make("Frame", {
+    Size                   = UDim2.fromOffset(SIDE - 20, 76);
+    Position               = UDim2.new(0, 10, 1, -88);
+    BackgroundColor3       = STS_BG;
+    BackgroundTransparency = 0.7;
+    BorderSizePixel        = 0;
+}, Side);
+corner(UserCard, 10);
+stroke(UserCard, WHITE, 1, 0.75);
+
+make("TextLabel", {
+    Size                   = UDim2.fromOffset(SIDE - 40, 16);
+    Position               = UDim2.fromOffset(10, 8);
+    BackgroundTransparency = 1;
+    Text                   = lp.DisplayName;
+    TextColor3             = WHITE;
+    Font                   = Enum.Font.GothamBold;
+    TextSize               = 12;
+    TextXAlignment         = Enum.TextXAlignment.Left;
+    TextTruncate           = Enum.TextTruncate.AtEnd;
+}, UserCard);
+
+local StsBar = make("Frame", {
+    Size                   = UDim2.fromOffset(SIDE - 36, 30);
+    Position               = UDim2.fromOffset(8, 38);
+    BackgroundColor3       = STS_BG;
+    BackgroundTransparency = 0.25;
+    BorderSizePixel        = 0;
+}, UserCard);
+corner(StsBar, 8);
+
+stsTxt = make("TextLabel", {
+    Size                   = UDim2.fromScale(1, 1);
+    BackgroundTransparency = 1;
+    Text                   = "READY";
+    TextColor3             = COL_OK;
+    Font                   = Enum.Font.GothamBold;
+    TextSize               = 11;
+    TextXAlignment         = Enum.TextXAlignment.Center;
+}, StsBar);
+
+-- ═══════════════════════════════════════
+-- TOP BAR
+-- ═══════════════════════════════════════
+local TopBar = make("Frame", {
+    Name                   = "TopBar";
+    Size                   = UDim2.new(1, -SIDE, 0, TOP);
+    Position               = UDim2.fromOffset(SIDE, 0);
+    BackgroundTransparency = 1;
+    BorderSizePixel        = 0;
+}, MainFrame);
+
+local PageTitle = make("TextLabel", {
+    Size                   = UDim2.new(1, -150, 1, 0);
+    Position               = UDim2.fromOffset(18, 0);
+    BackgroundTransparency = 1;
+    Text                   = "Main";
+    Font                   = Enum.Font.GothamBold;
+    TextSize               = 16;
+    TextXAlignment         = Enum.TextXAlignment.Left;
+}, TopBar);
+bind(PageTitle, "TextColor3", "ink");
+
+local TopLine = make("Frame", {
+    Size            = UDim2.new(1, -28, 0, 1);
+    Position        = UDim2.new(0, 14, 1, -1);
+    BorderSizePixel = 0;
+}, TopBar);
+bind(TopLine, "BackgroundColor3", "line");
+
+-- minimize (green)
+local MinBtn = make("TextButton", {
+    Size             = UDim2.fromOffset(14, 14);
+    Position         = UDim2.new(1, -52, 0.5, -7);
+    BackgroundColor3 = Color3.fromRGB(60, 180, 60);
+    BorderSizePixel  = 0;
+    Text             = "";
+    AutoButtonColor  = false;
+}, TopBar);
+corner(MinBtn, 7);
+
+-- close (red)
+local CloseBtn = make("TextButton", {
+    Size             = UDim2.fromOffset(14, 14);
+    Position         = UDim2.new(1, -30, 0.5, -7);
+    BackgroundColor3 = Color3.fromRGB(255, 90, 80);
+    BorderSizePixel  = 0;
+    Text             = "";
+    AutoButtonColor  = false;
+}, TopBar);
+corner(CloseBtn, 7);
+
+CloseBtn.MouseButton1Click:Connect(terminate);
+
+-- dark mode pill (turning it off returns to the last non-dark theme, Winter by default)
+local isDark = false;
+local ThemeState = { last = "winter" };
+local ThemePill = make("TextButton", {
+    Size             = UDim2.fromOffset(72, 22);
+    Position         = UDim2.new(1, -134, 0.5, -11);
+    BackgroundColor3 = WHITE;
+    BorderSizePixel  = 0;
+    Text             = "";
+    AutoButtonColor  = false;
+}, TopBar);
+corner(ThemePill, 11);
+bind(ThemePill, "BackgroundColor3", "row");
+
+local pillLbl = make("TextLabel", {
+    Size                   = UDim2.fromOffset(36, 22);
+    Position               = UDim2.fromOffset(10, 0);
+    BackgroundTransparency = 1;
+    Text                   = "Dark";
+    Font                   = Enum.Font.GothamBold;
+    TextSize               = 11;
+    TextXAlignment         = Enum.TextXAlignment.Left;
+}, ThemePill);
+bind(pillLbl, "TextColor3", "ink");
+
+local pTrack = make("Frame", {
+    Size             = UDim2.fromOffset(24, 14);
+    Position         = UDim2.new(1, -30, 0.5, -7);
+    BackgroundColor3 = WHITE;
+    BorderSizePixel  = 0;
+}, ThemePill);
+corner(pTrack, 7);
+local pKnob = make("Frame", {
+    Size             = UDim2.fromOffset(10, 10);
+    Position         = UDim2.fromOffset(2, 2);
+    BackgroundColor3 = WHITE;
+    BorderSizePixel  = 0;
+}, pTrack);
+corner(pKnob, 5);
+
+table.insert(refreshers, function()
+    pTrack.BackgroundColor3 = isDark and cur.accent or cur.swOff;
+end);
+
+ThemePill.MouseButton1Click:Connect(function()
+    isDark = not isDark;
+    TweenService:Create(pKnob, TweenInfo.new(0.15, Enum.EasingStyle.Quad), {
+        Position = isDark and UDim2.fromOffset(12, 2) or UDim2.fromOffset(2, 2)
+    }):Play();
+    setTheme(isDark and "dark" or ThemeState.last);
+end);
+
+MinBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized;
+    ThemePill.Visible = not minimized;
+    local target = minimized and UDim2.fromOffset(270, TOP) or UDim2.fromOffset(W, H);
+    TweenService:Create(MainFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad), { Size = target }):Play();
+end);
+
+makeDraggable(TopBar, MainFrame);
+makeDraggable(Side, MainFrame);
+
+-- ═══════════════════════════════════════
+-- PAGES
+-- ═══════════════════════════════════════
+local Pages = make("Frame", {
+    Size                   = UDim2.new(1, -SIDE, 1, -TOP);
+    Position               = UDim2.fromOffset(SIDE, TOP);
+    BackgroundTransparency = 1;
+    BorderSizePixel        = 0;
+}, MainFrame);
+
+local mainPage = make("Frame", {
+    Size = UDim2.fromScale(1, 1); BackgroundTransparency = 1; BorderSizePixel = 0;
+}, Pages);
+local credPage = make("Frame", {
+    Size = UDim2.fromScale(1, 1); BackgroundTransparency = 1; BorderSizePixel = 0; Visible = false;
+}, Pages);
+local settingsPage = make("Frame", {
+    Size = UDim2.fromScale(1, 1); BackgroundTransparency = 1; BorderSizePixel = 0; Visible = false;
+}, Pages);
+local ragePage = make("Frame", {
+    Size = UDim2.fromScale(1, 1); BackgroundTransparency = 1; BorderSizePixel = 0; Visible = false;
+}, Pages);
+
+-- themed card frame (gradient fill + outline)
+local function cardFrame(parent, x, y, w, h)
+    local card = make("Frame", {
+        Size             = UDim2.fromOffset(w, h);
+        Position         = UDim2.fromOffset(x, y);
+        BackgroundColor3 = WHITE;
+        BorderSizePixel  = 0;
+    }, parent);
+    corner(card, 12);
+    bind(card, "BackgroundTransparency", "cardT");
+    themedGradient(card, { "cardA", "cardB" }, 90);
+    local st = stroke(card, cur.line, 1);
+    bind(st, "Color", "line");
+    return card;
+end;
+
+local function makeCard(parent, x, y, w, h, title, sub)
+    local card = cardFrame(parent, x, y, w, h);
+
+    local t = make("TextLabel", {
+        Size                   = UDim2.fromOffset(w - 24, 18);
+        Position               = UDim2.fromOffset(12, 10);
+        BackgroundTransparency = 1;
+        Text                   = title;
+        TextColor3             = WHITE;
+        Font                   = Enum.Font.GothamBold;
+        TextSize               = 14;
+        TextXAlignment         = Enum.TextXAlignment.Left;
+    }, card);
+    themedGradient(t, { "titleA", "titleB" }, 0);
+
+    local s = make("TextLabel", {
+        Size                   = UDim2.fromOffset(w - 24, 14);
+        Position               = UDim2.fromOffset(12, 28);
+        BackgroundTransparency = 1;
+        Text                   = sub;
+        Font                   = Enum.Font.Gotham;
+        TextSize               = 10;
+        TextXAlignment         = Enum.TextXAlignment.Left;
+    }, card);
+    bind(s, "TextColor3", "dim");
+
+    local body = make("Frame", {
+        Size                   = UDim2.fromOffset(w - 20, h - 60);
+        Position               = UDim2.fromOffset(10, 50);
+        BackgroundTransparency = 1;
+        BorderSizePixel        = 0;
+    }, card);
+    local lay = Instance.new("UIListLayout");
+    lay.Padding   = UDim.new(0, 6);
+    lay.SortOrder = Enum.SortOrder.LayoutOrder;
+    lay.Parent    = body;
+    return card, body;
+end;
+
+local function makeRow(body, order)
+    local row = make("Frame", {
+        Size            = UDim2.new(1, 0, 0, 30);
+        BorderSizePixel = 0;
+        LayoutOrder     = order;
+    }, body);
+    corner(row, 8);
+    bind(row, "BackgroundColor3", "row");
+    return row;
+end;
+
+local function makeRowLabel(row, text, widthMinus)
+    local l = make("TextLabel", {
+        Size                   = UDim2.new(1, -widthMinus, 1, 0);
+        Position               = UDim2.fromOffset(10, 0);
+        BackgroundTransparency = 1;
+        Text                   = text;
+        Font                   = Enum.Font.GothamMedium;
+        TextSize               = 12;
+        TextXAlignment         = Enum.TextXAlignment.Left;
+        TextTruncate           = Enum.TextTruncate.AtEnd;
+    }, row);
+    bind(l, "TextColor3", "ink");
+    return l;
+end;
+
+-- toggle row bound to a boolean Config key
+local function makeToggle(body, order, label, cfgKey)
+    local row = makeRow(body, order);
+    makeRowLabel(row, label, 60);
+
+    local track = make("Frame", {
+        Size             = UDim2.fromOffset(34, 18);
+        Position         = UDim2.new(1, -44, 0.5, -9);
+        BackgroundColor3 = WHITE;
+        BorderSizePixel  = 0;
+    }, row);
+    corner(track, 9);
+    local knob = make("Frame", {
+        Size             = UDim2.fromOffset(14, 14);
+        Position         = UDim2.fromOffset(2, 2);
+        BackgroundColor3 = WHITE;
+        BorderSizePixel  = 0;
+    }, track);
+    corner(knob, 7);
+
+    local function paint()
+        track.BackgroundColor3 = Config[cfgKey] and cur.accent or cur.swOff;
+    end;
+    paint();
+    knob.Position = Config[cfgKey] and UDim2.fromOffset(18, 2) or UDim2.fromOffset(2, 2);
+    table.insert(refreshers, paint);
+
+    local btn = make("TextButton", {
+        Size = UDim2.fromScale(1, 1); BackgroundTransparency = 1; Text = "";
+    }, row);
+    btn.MouseButton1Click:Connect(function()
+        Config[cfgKey] = not Config[cfgKey];
+        paint();
+        TweenService:Create(knob, TweenInfo.new(0.15, Enum.EasingStyle.Quad), {
+            Position = Config[cfgKey] and UDim2.fromOffset(18, 2) or UDim2.fromOffset(2, 2)
+        }):Play();
+    end);
+end;
+
+-- label + numeric textbox row bound to a number Config key
+local boxes = {};
+local function makeSettingRow(body, order, labelTxt, cfgKey)
+    local row = makeRow(body, order);
+    local lbl = makeRowLabel(row, labelTxt, 76);
+
+    local box = make("TextBox", {
+        Size                   = UDim2.fromOffset(60, 22);
+        Position               = UDim2.new(1, -68, 0.5, -11);
+        BorderSizePixel        = 0;
+        Text                   = tostring(Config[cfgKey]);
+        Font                   = Enum.Font.GothamBold;
+        TextSize               = 12;
+        TextXAlignment         = Enum.TextXAlignment.Center;
+        ClearTextOnFocus       = false;
+    }, row);
+    corner(box, 6);
+    bind(box, "BackgroundColor3", "input");
+    bind(box, "TextColor3", "inputTxt");
+    local st = stroke(box, cur.line, 1);
+    bind(st, "Color", "line");
+
+    box.Focused:Connect(function() st.Color = BLUE end);
+    box.FocusLost:Connect(function()
+        st.Color = cur.line;
+        local n = tonumber(box.Text);
+        if n then Config[cfgKey] = n else box.Text = tostring(Config[cfgKey]) end;
+    end);
+
+    boxes[cfgKey] = box;
+    return lbl;
+end;
+
+-- ═══════════════════════════════════════
+-- MAIN PAGE — left card: modules
+-- ═══════════════════════════════════════
+local _, modBody = makeCard(mainPage, 14, 14, CARD_W, CARD_H, "Modules", "Enable or disable features");
+makeToggle(modBody, 1, "Status",          "Enabled");
+makeToggle(modBody, 2, "Lethal",          "LethalEnabled");
+makeToggle(modBody, 3, "Cancel",          "CancelEnabled");
+makeToggle(modBody, 4, "Cooldown Detect", "CooldownActive");
+makeToggle(modBody, 5, "NoClip",          "NoClipEnabled");
+makeToggle(modBody, 6, "Touch Mode",      "TouchMode");
+
+-- ═══════════════════════════════════════
+-- MAIN PAGE — right card: tuning
+-- ═══════════════════════════════════════
+local _, tuneBody = makeCard(mainPage, 14 + CARD_W + 12, 14, CARD_W, CARD_H, "Lethal Tuning", "Timing and accuracy");
+
+-- mode row (segmented V1 / V2)
+local modeRow = makeRow(tuneBody, 1);
+makeRowLabel(modeRow, "Mode", 90);
+local seg = make("Frame", {
+    Size            = UDim2.fromOffset(76, 22);
+    Position        = UDim2.new(1, -84, 0.5, -11);
+    BorderSizePixel = 0;
+}, modeRow);
+corner(seg, 6);
+bind(seg, "BackgroundColor3", "segBg");
+
+local segBtns = {};
+for i, name in ipairs({ "V1", "V2" }) do
+    local b = make("TextButton", {
+        Size                   = UDim2.fromOffset(36, 18);
+        Position               = UDim2.fromOffset(2 + (i - 1) * 36, 2);
+        BackgroundColor3       = BLUE;
+        BackgroundTransparency = 1;
+        BorderSizePixel        = 0;
+        Text                   = name;
+        Font                   = Enum.Font.GothamBold;
+        TextSize               = 11;
+        AutoButtonColor        = false;
+    }, seg);
+    corner(b, 5);
+    segBtns[name] = b;
+end;
+
+local function paintSeg(animate)
+    for name, b in pairs(segBtns) do
+        local on    = (Config.LethalMode == name);
+        b.BackgroundColor3 = cur.accent;
+        local goalT = on and 0 or 1;
+        local goalC = on and WHITE or cur.dim;
+        if animate then
+            TweenService:Create(b, TweenInfo.new(0.15), { BackgroundTransparency = goalT; TextColor3 = goalC }):Play();
+        else
+            b.BackgroundTransparency = goalT;
+            b.TextColor3 = goalC;
+        end;
+    end;
+end;
+paintSeg(false);
+table.insert(refreshers, function() paintSeg(false) end);
+
+local fields = {
+    { "Delay",        "LethalDelay"       };
+    { "Jump Power",   "LethalJump"        };
+    { "Accuracy",     "LethalAccuracy"    };
+    { "Dash Range",   "DashRange"         };
+    { "Cancel Delay", "LethalCancelDelay" };
+};
+
+local accLbl = nil;
+for i, fd in ipairs(fields) do
+    local lbl = makeSettingRow(tuneBody, i + 1, fd[1], fd[2]);
+    if fd[2] == "LethalAccuracy" then accLbl = lbl end;
+end;
+
+for name, b in pairs(segBtns) do
+    b.MouseButton1Click:Connect(function()
+        if Config.LethalMode == name then return end;
+        Config.LethalMode = name;
+        if accLbl then
+            accLbl.Text = (Config.LethalMode == "V2") and "Flip Delay" or "Accuracy";
+            Config.LethalAccuracy = (Config.LethalMode == "V2") and 0.25 or 15;
+            if boxes.LethalAccuracy then boxes.LethalAccuracy.Text = tostring(Config.LethalAccuracy) end;
+        end;
+        paintSeg(true);
+    end);
+end;
+
+-- ═══════════════════════════════════════
+-- NOTIFICATION TOAST (lives on the ScreenGui so it shows while the window is hidden)
+-- ═══════════════════════════════════════
+local TOAST_HIDDEN = UDim2.new(0.5, 0, 0, -64);
+local TOAST_SHOWN  = UDim2.new(0.5, 0, 0, 18);
+
+local Toast = make("Frame", {
+    Name                   = "Toast";
+    AnchorPoint            = Vector2.new(0.5, 0);
+    Size                   = UDim2.fromOffset(236, 44);
+    Position               = TOAST_HIDDEN;
+    BackgroundColor3       = WHITE;
+    BackgroundTransparency = 0.04;
+    BorderSizePixel        = 0;
+}, ScreenGui);
+corner(Toast, 12);
+themedGradient(Toast, { "cardA", "cardB" }, 90);
+local toastStroke = stroke(Toast, cur.line, 1);
+bind(toastStroke, "Color", "line");
+
+local toastBar = make("Frame", {
+    Size             = UDim2.fromOffset(4, 24);
+    Position         = UDim2.fromOffset(10, 10);
+    BackgroundColor3 = WHITE;
+    BorderSizePixel  = 0;
+}, Toast);
+corner(toastBar, 2);
+do
+    local g = Instance.new("UIGradient");
+    g.Color    = ColorSequence.new(BLUE_DARK, CYAN);
+    g.Rotation = 90;
+    g.Parent   = toastBar;
+end;
+
+local toastTitle = make("TextLabel", {
+    Size                   = UDim2.fromOffset(200, 16);
+    Position               = UDim2.fromOffset(24, 6);
+    BackgroundTransparency = 1;
+    Text                   = "";
+    Font                   = Enum.Font.GothamBold;
+    TextSize               = 12;
+    TextXAlignment         = Enum.TextXAlignment.Left;
+}, Toast);
+bind(toastTitle, "TextColor3", "ink");
+
+local toastBody = make("TextLabel", {
+    Size                   = UDim2.fromOffset(200, 14);
+    Position               = UDim2.fromOffset(24, 23);
+    BackgroundTransparency = 1;
+    Text                   = "";
+    Font                   = Enum.Font.Gotham;
+    TextSize               = 11;
+    TextXAlignment         = Enum.TextXAlignment.Left;
+}, Toast);
+bind(toastBody, "TextColor3", "dim");
+
+local toastGen = 0;
+local function notify(title, body)
+    toastGen += 1;
+    local gen = toastGen;
+    toastTitle.Text = title;
+    toastBody.Text  = body;
+    TweenService:Create(Toast, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+        { Position = TOAST_SHOWN }):Play();
+    task.delay(2, function()
+        if gen ~= toastGen or not isCurrent() then return end;
+        TweenService:Create(Toast, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+            { Position = TOAST_HIDDEN }):Play();
+    end);
+end;
+
+-- E hotkey: flip the lethal delay between its two presets
+local DELAY_A, DELAY_B = 0.45, 0.55;
+local function toggleDelay()
+    if math.abs(Config.LethalDelay - DELAY_A) < 1e-6 then
+        Config.LethalDelay = DELAY_B;
+    else
+        Config.LethalDelay = DELAY_A;
+    end;
+    if boxes.LethalDelay then boxes.LethalDelay.Text = tostring(Config.LethalDelay) end;
+    notify("Delay changed", string.format("Lethal delay is now %gs", Config.LethalDelay));
+end;
+
+-- ═══════════════════════════════════════
+-- RAGE PAGE — target list, move toggles, follow + move loop
+-- ═══════════════════════════════════════
+local RageCfg = {
+    Enabled = false;
+    Behind  = 6.5;     -- studs behind the target
+    Smooth  = 18;      -- follow stiffness, higher = tighter (uncalibrated)
+    MoveGap = 0.03;    -- seconds between moves in the loop, 0 = one per frame (uncalibrated)
+    Moves   = {
+        Hit = true; NormalPunch = true; ConsecutivePunches = true;
+        Shove = true; Uppercut = true; Dash = true; SideDash = true;
+    };
+};
+
+local MOVE_ORDER = {
+    { key = "Hit",                label = "Hit (M1)"                                   };
+    { key = "NormalPunch",        label = "Normal Punch",        tool = "Normal Punch"        };
+    { key = "ConsecutivePunches", label = "Consecutive Punches", tool = "Consecutive Punches" };
+    { key = "Shove",              label = "Shove",               tool = "Shove"               };
+    { key = "Uppercut",           label = "Uppercut",            tool = "Uppercut"            };
+    { key = "Dash",               label = "Dash"                                       };
+    { key = "SideDash",           label = "Side Dash"                                  };
+};
+
+local selectedPlayer = nil;
+local rageState = { target = nil; root = nil; teleported = false; held = false };
+
+-- pure: point `studs` behind a CFrame, on the flat plane, at the CFrame's own height
+local function behindPosition(targetCF, studs)
+    local look = targetCF.LookVector;
+    local flat = Vector3.new(look.X, 0, look.Z);
+    if flat.Magnitude < 1e-3 then flat = Vector3.new(0, 0, -1) end;
+    return targetCF.Position - flat.Unit * studs;
+end;
+
+local function isAlive(char)
+    local hum = char and char:FindFirstChildOfClass("Humanoid");
+    return hum ~= nil and hum.Health > 0;
+end;
+
+-- ── remote calls (arguments copied from the captured calls) ──
+local function getComm()
+    local char = lp.Character;
+    return char and char:FindFirstChild("Communicate");
+end;
+
+local function findTool(name)
+    local bp = lp:FindFirstChild("Backpack");
+    return (bp and bp:FindFirstChild(name)) or (lp.Character and lp.Character:FindFirstChild(name));
+end;
+
+local function aimCFrame()
+    local cam = workspace.CurrentCamera;
+    return cam and cam.CFrame or CFrame.new();
+end;
+
+local function fireHit()
+    local ev = getComm();
+    if not ev then return end;
+    pcall(function()
+        ev:FireServer({ MousePos = aimCFrame(); Goal = "LeftClick"; Tick = 1 });
+        ev:FireServer({ Goal = "LeftClickRelease"; Tick = 1 });
+    end);
+end;
+
+local function fireConsoleMove(toolName)
+    local ev   = getComm();
+    local tool = findTool(toolName);
+    if not ev or not tool then return end;
+    pcall(function()
+        ev:FireServer({ IsAutoActivate = true; Goal = "Console Move"; Tool = tool; ToolName = toolName });
+    end);
+end;
+
+local function fireRageDash()
+    local ev = getComm();
+    if not ev then return end;
+    pcall(function()
+        ev:FireServer({ Key = Enum.KeyCode.Q; MousePos = aimCFrame(); Dash = Enum.KeyCode.W; Goal = "KeyPress"; Tick = 1 });
+    end);
+end;
+
+local function fireSideDash()
+    local ev = getComm();
+    if not ev then return end;
+    pcall(function()
+        ev:FireServer({ Key = Enum.KeyCode.Q; MousePos = aimCFrame(); Dash = Enum.KeyCode.D; Goal = "KeyPress"; Tick = 1 });
+    end);
+end;
+
+local function runMove(m)
+    if m.key == "Hit" then
+        fireHit();
+    elseif m.key == "Dash" then
+        fireRageDash();
+    elseif m.key == "SideDash" then
+        fireSideDash();
+    else
+        fireConsoleMove(m.tool);
+    end;
+end;
+
+-- ── UI: players card ──
+local _, playersBody = makeCard(ragePage, 14, 14, 180, CARD_H, "Players", "Pick a target");
+
+local listFrame = make("ScrollingFrame", {
+    Size                   = UDim2.new(1, 0, 0, 148);
+    BackgroundTransparency = 1;
+    BorderSizePixel        = 0;
+    ScrollBarThickness     = 3;
+    ScrollBarImageColor3   = BLUE;
+    CanvasSize             = UDim2.new();
+    AutomaticCanvasSize    = Enum.AutomaticSize.Y;
+    ScrollingDirection     = Enum.ScrollingDirection.Y;
+    LayoutOrder            = 1;
+}, playersBody);
+do
+    local l = Instance.new("UIListLayout");
+    l.Padding   = UDim.new(0, 4);
+    l.SortOrder = Enum.SortOrder.Name;
+    l.Parent    = listFrame;
+end;
+
+local emptyLbl = make("TextLabel", {
+    Name                   = "!empty";
+    Size                   = UDim2.new(1, -6, 0, 30);
+    BackgroundTransparency = 1;
+    Text                   = "No other players";
+    Font                   = Enum.Font.Gotham;
+    TextSize               = 11;
+}, listFrame);
+bind(emptyLbl, "TextColor3", "dim");
+
+local targetLbl = make("TextLabel", {
+    Size                   = UDim2.new(1, 0, 0, 18);
+    BackgroundTransparency = 1;
+    Text                   = "Target: none";
+    Font                   = Enum.Font.GothamBold;
+    TextSize               = 11;
+    TextXAlignment         = Enum.TextXAlignment.Left;
+    TextTruncate           = Enum.TextTruncate.AtEnd;
+    LayoutOrder            = 2;
+}, playersBody);
+bind(targetLbl, "TextColor3", "dim");
+
+-- numeric value rows (clamped to a sane range)
+local function makeRageValue(body, order, label, tbl, key, lo, hi)
+    local row = makeRow(body, order);
+    makeRowLabel(row, label, 62);
+    local box = make("TextBox", {
+        Size             = UDim2.fromOffset(52, 22);
+        Position         = UDim2.new(1, -58, 0.5, -11);
+        BorderSizePixel  = 0;
+        Text             = tostring(tbl[key]);
+        Font             = Enum.Font.GothamBold;
+        TextSize         = 12;
+        TextXAlignment   = Enum.TextXAlignment.Center;
+        ClearTextOnFocus = false;
+    }, row);
+    corner(box, 6);
+    bind(box, "BackgroundColor3", "input");
+    bind(box, "TextColor3", "inputTxt");
+    local st = stroke(box, cur.line, 1);
+    bind(st, "Color", "line");
+    box.Focused:Connect(function() st.Color = BLUE end);
+    box.FocusLost:Connect(function()
+        st.Color = cur.line;
+        local n = tonumber(box.Text);
+        if n and n == n then tbl[key] = math.clamp(n, lo, hi) end;
+        box.Text = tostring(tbl[key]);
+    end);
+end;
+makeRageValue(playersBody, 3, "Studs Behind", RageCfg, "Behind",  0.5, 60);
+makeRageValue(playersBody, 4, "Move Gap",     RageCfg, "MoveGap", 0,   2);
+
+local playerRows = {};
+
+local function paintRows()
+    for pl, b in pairs(playerRows) do
+        local on = (pl == selectedPlayer);
+        b.BackgroundColor3 = on and cur.accent or cur.row;
+        b.TextColor3       = on and WHITE or cur.ink;
+    end;
+end;
+table.insert(refreshers, paintRows);
+
+local function updateTargetLabel()
+    targetLbl.Text = selectedPlayer and ("Target: " .. selectedPlayer.DisplayName) or "Target: none";
+    emptyLbl.Visible = (next(playerRows) == nil);
+end;
+
+local function unselectPlayer(died)
+    local was = selectedPlayer;
+    selectedPlayer        = nil;
+    rageState.target      = nil;
+    rageState.teleported  = false;
+    paintRows();
+    updateTargetLabel();
+    if died and was then
+        notify("Target down", was.DisplayName .. " died, unselected");
+    end;
+end;
+
+local function selectPlayer(pl)
+    selectedPlayer       = pl;
+    rageState.teleported = false;
+    paintRows();
+    updateTargetLabel();
+end;
+
+local function addPlayerRow(pl)
+    if pl == lp or playerRows[pl] then return end;
+    local b = make("TextButton", {
+        Name            = string.lower(pl.DisplayName) .. "_" .. pl.UserId;
+        Size            = UDim2.new(1, -6, 0, 30);
+        BorderSizePixel = 0;
+        Text            = pl.DisplayName;
+        Font            = Enum.Font.GothamMedium;
+        TextSize        = 12;
+        TextXAlignment  = Enum.TextXAlignment.Left;
+        TextTruncate    = Enum.TextTruncate.AtEnd;
+        AutoButtonColor = false;
+    }, listFrame);
+    corner(b, 8);
+    local pad = Instance.new("UIPadding");
+    pad.PaddingLeft = UDim.new(0, 10);
+    pad.Parent = b;
+    playerRows[pl] = b;
+    b.MouseButton1Click:Connect(function()
+        if selectedPlayer == pl then unselectPlayer(false) else selectPlayer(pl) end;
+    end);
+    paintRows();
+    updateTargetLabel();
+end;
+
+local function removePlayerRow(pl)
+    local b = playerRows[pl];
+    if b then b:Destroy() end;
+    playerRows[pl] = nil;
+    if selectedPlayer == pl then unselectPlayer(false) end;
+    updateTargetLabel();
+end;
+
+for _, pl in ipairs(Players:GetPlayers()) do addPlayerRow(pl) end;
+updateTargetLabel();
+table.insert(uiConns, Players.PlayerAdded:Connect(addPlayerRow));
+table.insert(uiConns, Players.PlayerRemoving:Connect(removePlayerRow));
+
+-- ── UI: rage card (master switch + one switch per move) ──
+local function makeRageToggle(body, order, label, tbl, key, onChange)
+    local row = makeRow(body, order);
+    makeRowLabel(row, label, 60);
+
+    local track = make("Frame", {
+        Size             = UDim2.fromOffset(34, 18);
+        Position         = UDim2.new(1, -44, 0.5, -9);
+        BackgroundColor3 = WHITE;
+        BorderSizePixel  = 0;
+    }, row);
+    corner(track, 9);
+    local knob = make("Frame", {
+        Size             = UDim2.fromOffset(14, 14);
+        Position         = tbl[key] and UDim2.fromOffset(18, 2) or UDim2.fromOffset(2, 2);
+        BackgroundColor3 = WHITE;
+        BorderSizePixel  = 0;
+    }, track);
+    corner(knob, 7);
+
+    local function paint()
+        track.BackgroundColor3 = tbl[key] and cur.accent or cur.swOff;
+    end;
+    paint();
+    table.insert(refreshers, paint);
+
+    local btn = make("TextButton", {
+        Size = UDim2.fromScale(1, 1); BackgroundTransparency = 1; Text = "";
+    }, row);
+    btn.MouseButton1Click:Connect(function()
+        tbl[key] = not tbl[key];
+        paint();
+        TweenService:Create(knob, TweenInfo.new(0.15, Enum.EasingStyle.Quad), {
+            Position = tbl[key] and UDim2.fromOffset(18, 2) or UDim2.fromOffset(2, 2)
+        }):Play();
+        if onChange then onChange(tbl[key]) end;
+    end);
+end;
+
+local _, rageBody = makeCard(ragePage, 14 + 180 + 12, 14, 210, CARD_H, "Rage", "Follow behind + move loop");
+makeRageToggle(rageBody, 1, "Rage Mode", RageCfg, "Enabled", function(on)
+    if on then
+        startRage();
+        if not selectedPlayer then
+            notify("Rage mode", "Pick a player first");
+        end;
+    else
+        stopRage();
+    end;
+end);
+for i, m in ipairs(MOVE_ORDER) do
+    makeRageToggle(rageBody, i + 1, m.label, RageCfg.Moves, m.key);
+end;
+
+-- 8 rows: tighten the rows so Side Dash fits inside the card
+do
+    local lay = rageBody:FindFirstChildOfClass("UIListLayout");
+    if lay then lay.Padding = UDim.new(0, 4) end;
+    for _, c in ipairs(rageBody:GetChildren()) do
+        if c:IsA("Frame") then c.Size = UDim2.new(1, 0, 0, 26) end;
+    end;
+end;
+
+-- ── controller: 1) teleport behind  2) smooth strafe behind  3) move loop ──
+-- Nothing below runs until Rage Mode is switched on; switching it off disconnects everything.
+local function releaseRage()
+    local char = lp.Character;
+    local hum  = char and char:FindFirstChildOfClass("Humanoid");
+    if hum then hum.AutoRotate = true end;
+    rageState.held       = false;
+    rageState.teleported = false;
+    rageState.target     = nil;
+end;
+
+local rageConn, rageGen = nil, 0;
+
+local function rageStep(dt)
+    if not isCurrent() then stopRage(); return end;
+    dt = math.clamp(dt, 0, 0.1);
+
+    local tgt = selectedPlayer;
+    if not (RageCfg.Enabled and tgt) then
+        if rageState.held then releaseRage() end;
+        return;
+    end;
+
+    local tChar = tgt.Character;
+    if not tChar then return end;                       -- target respawning / not loaded yet
+    if not isAlive(tChar) then unselectPlayer(true); return end;
+
+    local myChar = lp.Character;
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart");
+    local myHum  = myChar and myChar:FindFirstChildOfClass("Humanoid");
+    local tRoot  = tChar:FindFirstChild("HumanoidRootPart");
+    if not myRoot or not myHum or myHum.Health <= 0 or not tRoot then return end;
+
+    local tp      = tRoot.Position;
+    local desired = behindPosition(tRoot.CFrame, RageCfg.Behind);
+    if desired.X ~= desired.X or desired.Y ~= desired.Y or desired.Z ~= desired.Z then return end;
+
+    myHum.AutoRotate = false;
+    rageState.held   = true;
+
+    -- step 1: teleport behind (also after our own respawn or a target switch)
+    if not rageState.teleported or rageState.target ~= tgt or rageState.root ~= myRoot then
+        rageState.target     = tgt;
+        rageState.root       = myRoot;
+        rageState.teleported = true;
+        myRoot.CFrame = CFrame.lookAt(desired, Vector3.new(tp.X, desired.Y, tp.Z));
+        myRoot.AssemblyLinearVelocity  = Vector3.zero;
+        myRoot.AssemblyAngularVelocity = Vector3.zero;
+        return;
+    end;
+
+    -- step 2: smooth strafe — frame-rate independent exponential follow, no re-teleporting
+    local alpha  = 1 - math.exp(-dt * RageCfg.Smooth);
+    local newPos = myRoot.Position:Lerp(desired, alpha);
+    local face   = Vector3.new(tp.X - newPos.X, 0, tp.Z - newPos.Z);
+    if face.Magnitude > 0.05 then
+        myRoot.CFrame = CFrame.lookAt(newPos, newPos + face);
+    else
+        myRoot.CFrame = CFrame.new(newPos) * myRoot.CFrame.Rotation;
+    end;
+    myRoot.AssemblyLinearVelocity  = Vector3.zero;
+    myRoot.AssemblyAngularVelocity = Vector3.zero;
+end;
+
+stopRage = function()
+    rageGen += 1;
+    if rageConn then rageConn:Disconnect(); rageConn = nil end;
+    releaseRage();
+end;
+
+startRage = function()
+    if rageConn then return end;
+    rageGen += 1;
+    local gen = rageGen;
+    rageConn = RunService.RenderStepped:Connect(rageStep);
+
+    -- step 3: move loop (only runs once the teleport has happened for the current target)
+    task.spawn(function()
+        while isCurrent() and gen == rageGen do
+            local tgt = selectedPlayer;
+            if RageCfg.Enabled and tgt and rageState.teleported and rageState.target == tgt then
+                for _, m in ipairs(MOVE_ORDER) do
+                    if not (isCurrent() and gen == rageGen and RageCfg.Enabled and selectedPlayer == tgt) then break end;
+                    if RageCfg.Moves[m.key] then
+                        runMove(m);
+                        task.wait(RageCfg.MoveGap);
+                    end;
+                end;
+                task.wait();
+            else
+                task.wait(0.05);
+            end;
+        end;
+    end);
+end;
+
+-- ═══════════════════════════════════════
+-- SETTINGS PAGE
+-- ═══════════════════════════════════════
+local SET_W = W - SIDE - 28;
+local SET_H = 170;
+local _, setBody = makeCard(settingsPage, 14, 14, SET_W, SET_H, "Settings", "Hide key and session controls");
+
+local keyRow = makeRow(setBody, 1);
+makeRowLabel(keyRow, "Hide / Show Key", 130);
+
+local listening = false;
+local keyBtn = make("TextButton", {
+    Size            = UDim2.fromOffset(110, 22);
+    Position        = UDim2.new(1, -118, 0.5, -11);
+    BorderSizePixel = 0;
+    Text            = "";
+    Font            = Enum.Font.GothamBold;
+    TextSize        = 12;
+    AutoButtonColor = false;
+}, keyRow);
+corner(keyBtn, 6);
+bind(keyBtn, "BackgroundColor3", "input");
+bind(keyBtn, "TextColor3", "inputTxt");
+local keyStroke = stroke(keyBtn, cur.line, 1);
+bind(keyStroke, "Color", "line");
+
+local function paintKey()
+    keyBtn.Text     = listening and "Press a key..." or uiToggleKey.Name;
+    keyStroke.Color = listening and BLUE or cur.line;
+end;
+paintKey();
+table.insert(refreshers, paintKey);
+
+keyBtn.MouseButton1Click:Connect(function()
+    listening = true;
+    paintKey();
+end);
+
+-- unload (two-step so it can't be hit by accident)
+local unloadBtn = make("TextButton", {
+    Size             = UDim2.new(1, 0, 0, 30);
+    BackgroundColor3 = Color3.fromRGB(255, 90, 80);
+    BorderSizePixel  = 0;
+    Text             = "Unload Onyx";
+    TextColor3       = WHITE;
+    Font             = Enum.Font.GothamBold;
+    TextSize         = 12;
+    AutoButtonColor  = false;
+    LayoutOrder      = 2;
+}, setBody);
+corner(unloadBtn, 8);
+
+local armed = false;
+unloadBtn.MouseButton1Click:Connect(function()
+    if armed then
+        terminate();
+        return;
+    end;
+    armed = true;
+    unloadBtn.Text = "Click again to confirm";
+    task.delay(3, function()
+        if armed and isCurrent() then
+            armed = false;
+            unloadBtn.Text = "Unload Onyx";
+        end;
+    end);
+end);
+
+local keyHint = make("TextLabel", {
+    Size                   = UDim2.fromOffset(SET_W, 14);
+    Position               = UDim2.fromOffset(14, 14 + SET_H + 8);
+    BackgroundTransparency = 1;
+    Text                   = "Click the key box, then press any key  ·  Esc cancels";
+    Font                   = Enum.Font.Gotham;
+    TextSize               = 10;
+    TextXAlignment         = Enum.TextXAlignment.Left;
+}, settingsPage);
+bind(keyHint, "TextColor3", "dim");
+
+-- hide / show hotkey + rebind capture
+table.insert(uiConns, UserInputService.InputBegan:Connect(function(input)
+    if not isCurrent() then return end;
+    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end;
+
+    if listening then
+        listening = false;
+        if input.KeyCode ~= Enum.KeyCode.Escape and input.KeyCode ~= Enum.KeyCode.Unknown then
+            uiToggleKey = input.KeyCode;
+        end;
+        paintKey();
+        return;
+    end;
+
+    if UserInputService:GetFocusedTextBox() then return end;
+    if input.KeyCode == uiToggleKey then
+        if introDone then setShown(not shown) end;
+    elseif input.KeyCode == Enum.KeyCode.E then
+        toggleDelay();
+    end;
+end));
+
+-- ═══════════════════════════════════════
+-- SETTINGS — THEME PICKER
+-- ═══════════════════════════════════════
+do
+    local T = { chips = {}; current = "winter" };
+    local ORDER = {
+        { "winter", "Winter"        };
+        { "light",  "Light"         };
+        { "dark",   "Dark"          };
+        { "mono",   "Black & White" };
+        { "autumn", "Autumn"        };
+        { "sakura", "Sakura"        };
+        { "forest", "Forest"        };
+    };
+
+    local _, body = makeCard(settingsPage, 14, 14 + SET_H + 8 + 22, SET_W, 114, "Themes", "Pick a look  ·  text stays readable on every one");
+
+    local scroll = make("ScrollingFrame", {
+        Size                   = UDim2.new(1, 0, 1, 0);
+        BackgroundTransparency = 1;
+        BorderSizePixel        = 0;
+        ScrollBarThickness     = 3;
+        CanvasSize             = UDim2.new();
+        AutomaticCanvasSize    = Enum.AutomaticSize.X;
+        ScrollingDirection     = Enum.ScrollingDirection.X;
+    }, body);
+    bind(scroll, "ScrollBarImageColor3", "accent");
+
+    local lay = Instance.new("UIListLayout");
+    lay.FillDirection = Enum.FillDirection.Horizontal;
+    lay.Padding       = UDim.new(0, 8);
+    lay.SortOrder     = Enum.SortOrder.LayoutOrder;
+    lay.Parent        = scroll;
+
+    local function paint()
+        for key, c in pairs(T.chips) do
+            local on = (key == T.current);
+            c.st.Color     = on and cur.accent or cur.line;
+            c.st.Thickness = on and 2 or 1;
+            c.lbl.Font     = on and Enum.Font.GothamBold or Enum.Font.GothamMedium;
+        end;
+    end;
+    table.insert(refreshers, paint);
+
+    for i, d in ipairs(ORDER) do
+        local key, name = d[1], d[2];
+        local th = THEMES[key];
+
+        local chip = make("TextButton", {
+            Size                   = UDim2.fromOffset(84, 42);
+            BackgroundTransparency = 1;
+            Text                   = "";
+            AutoButtonColor        = false;
+            LayoutOrder            = i;
+        }, scroll);
+
+        -- preview is a CanvasGroup (clips to the rounded corners); its gradient sits on a
+        -- child frame so it never tints the strip / card / dot inside it
+        local prev = make("CanvasGroup", {
+            Size                   = UDim2.new(1, 0, 0, 28);
+            BackgroundColor3       = WHITE;
+            BackgroundTransparency = 1;
+            BorderSizePixel        = 0;
+        }, chip);
+        corner(prev, 8);
+
+        local pbg = make("Frame", {
+            Size = UDim2.fromScale(1, 1); BackgroundColor3 = WHITE; BorderSizePixel = 0;
+        }, prev);
+        do
+            local g = Instance.new("UIGradient");
+            g.Rotation = 125;
+            g.Color = ColorSequence.new({
+                ColorSequenceKeypoint.new(0,   th.winA);
+                ColorSequenceKeypoint.new(0.5, th.winB);
+                ColorSequenceKeypoint.new(1,   th.winC);
+            });
+            g.Parent = pbg;
+        end;
+
+        local strip = make("Frame", {
+            Size = UDim2.fromOffset(20, 28); BackgroundColor3 = WHITE; BorderSizePixel = 0;
+        }, prev);
+        do
+            local g = Instance.new("UIGradient");
+            g.Rotation = 90;
+            g.Color    = ColorSequence.new(th.sideA, th.sideB);
+            g.Parent   = strip;
+        end;
+
+        local mini = make("Frame", {
+            Size = UDim2.fromOffset(38, 14); Position = UDim2.fromOffset(26, 7);
+            BackgroundColor3 = th.cardA; BorderSizePixel = 0;
+        }, prev);
+        corner(mini, 4);
+
+        local dot = make("Frame", {
+            Size = UDim2.fromOffset(10, 10); Position = UDim2.fromOffset(68, 9);
+            BackgroundColor3 = th.accent; BorderSizePixel = 0;
+        }, prev);
+        corner(dot, 5);
+
+        local st = stroke(prev, cur.line, 1);
+
+        local lbl = make("TextLabel", {
+            Size                   = UDim2.new(1, 0, 0, 12);
+            Position               = UDim2.fromOffset(0, 30);
+            BackgroundTransparency = 1;
+            Text                   = name;
+            Font                   = Enum.Font.GothamMedium;
+            TextSize               = 10;
+            TextTruncate           = Enum.TextTruncate.AtEnd;
+        }, chip);
+        bind(lbl, "TextColor3", "ink");
+
+        T.chips[key] = { st = st; lbl = lbl };
+
+        chip.MouseButton1Click:Connect(function()
+            T.current = key;
+            isDark    = (key == "dark");
+            if key ~= "dark" then ThemeState.last = key end;
+            TweenService:Create(pKnob, TweenInfo.new(0.15, Enum.EasingStyle.Quad), {
+                Position = isDark and UDim2.fromOffset(12, 2) or UDim2.fromOffset(2, 2)
+            }):Play();
+            setTheme(key);
+            paint();
+        end);
+    end;
+
+    -- keep the picker in sync when the top-bar Dark pill is used
+    table.insert(uiConns, ThemePill.MouseButton1Click:Connect(function()
+        task.defer(function()
+            T.current = isDark and "dark" or ThemeState.last;
+            paint();
+        end);
+    end));
+
+    paint();
+end;
+
+-- ═══════════════════════════════════════
+-- CREDITS PAGE
+-- ═══════════════════════════════════════
+local credCard = cardFrame(credPage, (W - SIDE) / 2 - 150, 40, 300, 214);
+
+local credLogo = make("Frame", {
+    Size             = UDim2.fromOffset(56, 56);
+    Position         = UDim2.new(0.5, -28, 0, 22);
+    BackgroundColor3 = WHITE;
+    BorderSizePixel  = 0;
+}, credCard);
+corner(credLogo, 28);
+do
+    local g = Instance.new("UIGradient");
+    g.Color    = ColorSequence.new(BLUE_DARK, CYAN);
+    g.Rotation = 135;
+    g.Parent   = credLogo;
+end;
+make("TextLabel", {
+    Size                   = UDim2.fromScale(1, 1);
+    BackgroundTransparency = 1;
+    Text                   = "O";
+    TextColor3             = WHITE;
+    Font                   = Enum.Font.GothamBlack;
+    TextSize               = 28;
+}, credLogo);
+
+local credTitle = make("TextLabel", {
+    Size                   = UDim2.new(1, 0, 0, 24);
+    Position               = UDim2.fromOffset(0, 86);
+    BackgroundTransparency = 1;
+    Text                   = "Onyx Hub";
+    Font                   = Enum.Font.GothamBold;
+    TextSize               = 20;
+}, credCard);
+bind(credTitle, "TextColor3", "ink");
+
+local credLine = make("Frame", {
+    Size            = UDim2.fromOffset(220, 1);
+    Position        = UDim2.new(0.5, -110, 0, 122);
+    BorderSizePixel = 0;
+}, credCard);
+bind(credLine, "BackgroundColor3", "line");
+
+local credBy = make("TextLabel", {
+    Size                   = UDim2.new(1, 0, 0, 14);
+    Position               = UDim2.fromOffset(0, 134);
+    BackgroundTransparency = 1;
+    Text                   = "CREDITS BY";
+    Font                   = Enum.Font.GothamBold;
+    TextSize               = 10;
+}, credCard);
+bind(credBy, "TextColor3", "dim");
+
+local credName = make("TextLabel", {
+    Size                   = UDim2.new(1, 0, 0, 30);
+    Position               = UDim2.fromOffset(0, 150);
+    BackgroundTransparency = 1;
+    Text                   = "JustH0bo";
+    TextColor3             = WHITE;
+    Font                   = Enum.Font.GothamBold;
+    TextSize               = 24;
+}, credCard);
+themedGradient(credName, { "titleA", "titleB" }, 0);
+
+local credVer = make("TextLabel", {
+    Size                   = UDim2.new(1, 0, 0, 14);
+    Position               = UDim2.fromOffset(0, 186);
+    BackgroundTransparency = 1;
+    Text                   = "Onyx v7";
+    Font                   = Enum.Font.Gotham;
+    TextSize               = 11;
+}, credCard);
+bind(credVer, "TextColor3", "dim");
+
+-- ═══════════════════════════════════════
+-- SIDEBAR NAV
+-- ═══════════════════════════════════════
+local pages     = { Main = mainPage; Rage = ragePage; Settings = settingsPage; Credits = credPage };
+local navBtns   = {};
+local activeTab = "Main";
+
+local function paintNav(animate)
+    for n, b in pairs(navBtns) do
+        local on    = (n == activeTab);
+        local goalT = on and 0 or 1;
+        local goalC = on and cur.navOnTxt or WHITE;
+        b.BackgroundColor3 = cur.navOn;
+        if animate then
+            TweenService:Create(b, TweenInfo.new(0.15), { BackgroundTransparency = goalT; TextColor3 = goalC }):Play();
+        else
+            b.BackgroundTransparency = goalT;
+            b.TextColor3 = goalC;
+        end;
+    end;
+end;
+
+local function selectTab(name)
+    activeTab = name;
+    for n, p in pairs(pages) do p.Visible = (n == name) end;
+    paintNav(true);
+    PageTitle.Text = name;
+end;
+
+for i, name in ipairs({ "Main", "Rage", "Settings", "Credits" }) do
+    local b = make("TextButton", {
+        Size                   = UDim2.fromOffset(SIDE - 24, 34);
+        Position               = UDim2.fromOffset(12, 94 + (i - 1) * 40);
+        BackgroundColor3       = WHITE;
+        BackgroundTransparency = 1;
+        BorderSizePixel        = 0;
+        Text                   = name;
+        TextColor3             = WHITE;
+        Font                   = Enum.Font.GothamBold;
+        TextSize               = 13;
+        TextXAlignment         = Enum.TextXAlignment.Left;
+        AutoButtonColor        = false;
+    }, Side);
+    corner(b, 10);
+    local pad = Instance.new("UIPadding");
+    pad.PaddingLeft = UDim.new(0, 14);
+    pad.Parent = b;
+    b.MouseButton1Click:Connect(function() selectTab(name) end);
+    navBtns[name] = b;
+end;
+table.insert(refreshers, function() paintNav(false) end);
+paintNav(false);
+
+-- ═══════════════════════════════════════
+-- COOLDOWN DRAIN BAR (inset so it never pokes past the rounded corners)
+-- ═══════════════════════════════════════
+CooldownBar = make("Frame", {
+    Size             = UDim2.new(1, -2 * RAD, 0, 3);
+    Position         = UDim2.new(0, RAD, 1, -4);
+    BackgroundColor3 = Color3.fromRGB(190, 210, 240);
+    BorderSizePixel  = 0;
+    Visible          = false;
+    ZIndex           = 10;
+}, MainFrame);
+corner(CooldownBar, 2);
+
+CooldownFill = make("Frame", {
+    Size             = UDim2.new(1, 0, 1, 0);
+    BackgroundColor3 = WHITE;
+    BorderSizePixel  = 0;
+    ZIndex           = 11;
+}, CooldownBar);
+corner(CooldownFill, 2);
+do
+    local g = Instance.new("UIGradient");
+    g.Color  = ColorSequence.new(BLUE_DARK, CYAN);
+    g.Parent = CooldownFill;
+end;
+
+-- ═══════════════════════════════════════
+-- SKY ANIMATION (snow + twinkling stars)
+-- Only ticks while the window is visible, capped at 30 updates per second,
+-- and the star twinkle is skipped entirely on themes that have no stars.
+-- ═══════════════════════════════════════
+local clock, skyAcc, starsOn = 0, 0, true;
+table.insert(uiConns, RunService.Heartbeat:Connect(function(dt)
+    if not isCurrent() or minimized or not MainFrame.Visible then return end;
+    skyAcc += dt;
+    if skyAcc < 1 / 30 then return end;
+    local step = math.min(skyAcc, 0.1);
+    skyAcc = 0;
+    clock += step;
+
+    for _, f in ipairs(flakes) do
+        f.y += f.vy * step;
+        if f.y > f.h then
+            f.y = -f.size;
+            f.x = math.random() * f.w;
+        end;
+        f.inst.Position = UDim2.fromOffset(f.x + math.sin(clock * f.freq + f.phase) * f.amp, f.y);
+    end;
+
+    local vis = cur.stars;
+    if vis > 0.001 then
+        starsOn = true;
+        for _, s in ipairs(starList) do
+            local tw = 0.5 + 0.5 * math.sin(clock * s.speed + s.phase);
+            s.inst.BackgroundTransparency = 1 - vis * (0.25 + 0.65 * tw);
+        end;
+    elseif starsOn then
+        starsOn = false;
+        for _, s in ipairs(starList) do s.inst.BackgroundTransparency = 1 end;
+    end;
+end));
+
+-- ═══════════════════════════════════════
+-- OPENING SEQUENCE
+-- 1) a white sparkle-star shoots in from the top right, sweeps down to the bottom left,
+--    swirls around and comes back across the screen, drawing a line;
+--    "JustH0bo Productions" is revealed along that line as the star passes
+-- 2) the splash fades out and the window eases in (fade + grow + rise, staggered pieces)
+-- Runs once at load and is fully wrapped in pcall so the window always opens.
+-- ═══════════════════════════════════════
+local function easeOutQuint(a) return 1 - (1 - a) ^ 5 end;
+local function easeOutCubic(a) return 1 - (1 - a) ^ 3 end;
+
+local WIN_START_SCALE, WIN_RISE, WIN_DUR = 0.84, 26, 0.75;
+
+-- hidden until the splash is done
+MainFrame.Visible = false;
+MainFrame.GroupTransparency = 1;
+uiScale.Scale = WIN_START_SCALE;
+animating = true;
+
+local function playSplash(holder: { frame: Instance? })
+    local vs = ScreenGui.AbsoluteSize;
+    if vs.X < 100 or vs.Y < 100 then
+        local cam = workspace.CurrentCamera;
+        vs = cam and cam.ViewportSize or Vector2.new(1280, 720);
+    end;
+    local sw, sh = vs.X, vs.Y;
+
+    -- soft dim so the white star reads on any map
+    local dim = make("Frame", {
+        Name                   = "Splash";
+        Size                   = UDim2.fromScale(1, 1);
+        BackgroundColor3       = Color3.fromRGB(6, 10, 24);
+        BackgroundTransparency = 1;
+        BorderSizePixel        = 0;
+        ZIndex                 = 50;
+    }, ScreenGui);
+    holder.frame = dim;
+    TweenService:Create(dim, TweenInfo.new(0.3, Enum.EasingStyle.Quad), { BackgroundTransparency = 0.5 }):Play();
+
+    -- text + line geometry
+    local cx, cy       = sw / 2, sh / 2;
+    local TW, TH       = 440, 40;
+    local textLeft     = cx - TW / 2;
+    local textRight    = cx + TW / 2;
+    local lineY        = cy + 22;
+
+    local reveal = make("Frame", {
+        Position               = UDim2.fromOffset(textLeft, lineY - TH - 8);
+        Size                   = UDim2.fromOffset(0, TH);
+        BackgroundTransparency = 1;
+        BorderSizePixel        = 0;
+        ClipsDescendants       = true;
+        ZIndex                 = 52;
+    }, dim);
+    local label = make("TextLabel", {
+        Size                   = UDim2.fromOffset(TW, TH);
+        BackgroundTransparency = 1;
+        Text                   = "JustH0bo Productions";
+        TextColor3             = WHITE;
+        TextStrokeTransparency = 0.8;
+        TextStrokeColor3       = Color3.fromRGB(120, 170, 255);
+        Font                   = Enum.Font.GothamBold;
+        TextSize               = 32;
+        TextXAlignment         = Enum.TextXAlignment.Center;
+        ZIndex                 = 52;
+    }, reveal);
+
+    local line = make("Frame", {
+        Position         = UDim2.fromOffset(textLeft, lineY);
+        Size             = UDim2.fromOffset(0, 2);
+        BackgroundColor3 = WHITE;
+        BorderSizePixel  = 0;
+        ZIndex           = 52;
+    }, dim);
+    corner(line, 1);
+    do
+        local lg = Instance.new("UIGradient");
+        lg.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0,    1);
+            NumberSequenceKeypoint.new(0.35, 0.4);
+            NumberSequenceKeypoint.new(1,    0);
+        });
+        lg.Parent = line;
+    end;
+
+    -- the star: drawn sparkle (core + 4 spikes + glow), so it never depends on emoji fonts
+    local star = make("Frame", {
+        AnchorPoint            = Vector2.new(0.5, 0.5);
+        Size                   = UDim2.fromOffset(40, 40);
+        Position               = UDim2.fromOffset(-100, -100);
+        BackgroundTransparency = 1;
+        ZIndex                 = 56;
+    }, dim);
+    local function starPart(w, h, rot, tr, z)
+        local p = make("Frame", {
+            AnchorPoint            = Vector2.new(0.5, 0.5);
+            Position               = UDim2.fromScale(0.5, 0.5);
+            Size                   = UDim2.fromOffset(w, h);
+            Rotation               = rot;
+            BackgroundColor3       = WHITE;
+            BackgroundTransparency = tr;
+            BorderSizePixel        = 0;
+            ZIndex                 = z;
+        }, star);
+        corner(p, math.max(w, h));
+        return p;
+    end;
+    starPart(40, 40, 0,  0.88, 55);   -- glow
+    starPart(34, 3,  0,  0,    56);   -- horizontal spike
+    starPart(3,  34, 0,  0,    56);   -- vertical spike
+    starPart(22, 2,  45, 0.15, 56);   -- diagonal spikes
+    starPart(22, 2, -45, 0.15, 56);
+    starPart(12, 12, 0,  0,    57);   -- core
+
+    -- trail dots (reused every frame)
+    local TRAIL, SPACING = 24, 9;
+    local trail = {};
+    for i = 1, TRAIL do
+        local k  = i / TRAIL;
+        local sz = math.max(2, math.floor(10 * (1 - k)) + 2);
+        local d = make("Frame", {
+            AnchorPoint            = Vector2.new(0.5, 0.5);
+            Size                   = UDim2.fromOffset(sz, sz);
+            Position               = UDim2.fromOffset(-100, -100);
+            BackgroundColor3       = WHITE;
+            BackgroundTransparency = 0.25 + 0.75 * k;
+            BorderSizePixel        = 0;
+            ZIndex                 = 54;
+        }, dim);
+        corner(d, sz);
+        trail[i] = d;
+    end;
+
+    -- ── build the path (screen pixels): leg -> swirl -> return line -> exit ──
+    local poly = {};
+    local function push(p)
+        local last = poly[#poly];
+        if not last or (p - last).Magnitude > 0.5 then table.insert(poly, p) end;
+    end;
+    local function bez3(a, b, c, d, n)
+        for i = 0, n do
+            local t, u = i / n, 1 - i / n;
+            push(a * (u * u * u) + b * (3 * u * u * t) + c * (3 * u * t * t) + d * (t * t * t));
+        end;
+    end;
+
+    local R0       = 0.13 * math.min(sw, sh);
+    local R1       = R0 * 0.55;
+    local dirIn    = Vector2.new(-0.7071, 0.7071);                    -- heading when the swirl starts (down-left)
+    local C        = Vector2.new(math.max(sw * 0.2, R0 + 24), sh * 0.68);
+    local E0       = C + Vector2.new(-0.7071, -0.7071) * R0;          -- swirl entry point
+    local P0       = Vector2.new(sw + 80, -80);                        -- top right, off screen
+
+    -- 1) top right -> swirl entry (tangent-matched)
+    bez3(P0, P0 + Vector2.new(-sw * 0.25, sh * 0.30), E0 - dirIn * (sw * 0.22), E0, 80);
+
+    -- 2) swirl: 495 degrees, radius shrinking (like the 💫 spiral), ends at the bottom of the circle heading right
+    do
+        local N = 120;
+        for i = 1, N do
+            local k   = i / N;
+            local phi = math.rad(225 - 495 * k);
+            local r   = R0 + (R1 - R0) * k;
+            push(C + Vector2.new(math.cos(phi), math.sin(phi)) * r);
+        end;
+    end;
+    local X = poly[#poly];
+
+    -- 3) rise onto the text line, run along it, then sweep up and away
+    local T0 = Vector2.new(math.max(textLeft - 40, X.X + 90), lineY);
+    local idxFinal = #poly;
+    bez3(X, X + Vector2.new(sw * 0.10, 0), T0 - Vector2.new(sw * 0.10, 0), T0, 60);
+    local T1 = Vector2.new(textRight + 70, lineY);
+    for i = 1, 24 do push(T0:Lerp(T1, i / 24)) end;
+    do
+        local a, b, c = T1, T1 + Vector2.new(sw * 0.08, 0), T1 + Vector2.new(sw * 0.18, -sh * 0.24);
+        for i = 1, 40 do
+            local t, u = i / 40, 1 - i / 40;
+            push(a * (u * u) + b * (2 * u * t) + c * (t * t));
+        end;
+    end;
+
+    -- cumulative length lookup
+    local cum = { 0 };
+    for i = 2, #poly do cum[i] = cum[i - 1] + (poly[i] - poly[i - 1]).Magnitude end;
+    local total  = cum[#cum];
+    local dFinal = cum[idxFinal];
+
+    local function posAt(d)
+        d = math.clamp(d, 0, total);
+        local lo, hi = 1, #cum;
+        while lo < hi do
+            local mid = math.floor((lo + hi) / 2);
+            if cum[mid] < d then lo = mid + 1 else hi = mid end;
+        end;
+        if lo == 1 then return poly[1] end;
+        local c0, c1 = cum[lo - 1], cum[lo];
+        local f = (c1 - c0 > 1e-6) and (d - c0) / (c1 - c0) or 0;
+        return poly[lo - 1]:Lerp(poly[lo], f);
+    end;
+
+    -- ── fly ──
+    local DUR = 2.9;
+    local t0  = tick();
+    while isCurrent() do
+        local a = math.clamp((tick() - t0) / DUR, 0, 1);
+        local e = 1 - (1 - a) ^ 1.7;              -- fast entry, settles as it crosses the text
+        local s = total * e;
+        local p = posAt(s);
+
+        star.Position = UDim2.fromOffset(p.X, p.Y);
+        star.Rotation = (tick() - t0) * 420;
+
+        for i = 1, TRAIL do
+            local tp = posAt(math.max(0, s - i * SPACING));
+            trail[i].Position = UDim2.fromOffset(tp.X, tp.Y);
+        end;
+
+        if s >= dFinal then
+            local w = math.clamp(p.X - textLeft + 8, 0, TW);
+            reveal.Size = UDim2.fromOffset(w, TH);
+            line.Size   = UDim2.fromOffset(math.clamp(p.X - textLeft + 20, 0, TW + 90), 2);
+            line.Position = UDim2.fromOffset(textLeft - 20 + 0, lineY);
+        end;
+
+        if a >= 1 then break end;
+        RunService.Heartbeat:Wait();
+    end;
+    if not isCurrent() then return end;
+
+    -- star + trail vanish, text and line fully shown
+    reveal.Size = UDim2.fromOffset(TW, TH);
+    line.Size   = UDim2.fromOffset(TW + 40, 2);
+    for _, d in ipairs(trail) do
+        TweenService:Create(d, TweenInfo.new(0.25), { BackgroundTransparency = 1 }):Play();
+    end;
+    TweenService:Create(star, TweenInfo.new(0.25), { Size = UDim2.fromOffset(0, 0) }):Play();
+
+    task.wait(1.0);
+    if not isCurrent() then return end;
+
+    -- fade everything out
+    local fade = TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In);
+    TweenService:Create(label, fade, { TextTransparency = 1; TextStrokeTransparency = 1 }):Play();
+    TweenService:Create(line,  fade, { BackgroundTransparency = 1 }):Play();
+    TweenService:Create(dim,   fade, { BackgroundTransparency = 1 }):Play();
+    task.wait(0.5);
+end;
+
+local function playWindowIntro()
+    if not isCurrent() then return end;
+
+    local finalPos = MainFrame.Position;
+    restPos = finalPos;
+    MainFrame.Visible = true;
+    uiScale.Scale = WIN_START_SCALE;
+    MainFrame.GroupTransparency = 1;
+    MainFrame.Position = UDim2.new(finalPos.X.Scale, finalPos.X.Offset, finalPos.Y.Scale, finalPos.Y.Offset + WIN_RISE);
+
+    -- slide an element from an offset to where it already sits
+    local function slideIn(inst, dx, dy, delay, dur)
+        if not inst then return end;
+        local goal = inst.Position;
+        inst.Position = UDim2.new(goal.X.Scale, goal.X.Offset + dx, goal.Y.Scale, goal.Y.Offset + dy);
+        task.delay(delay, function()
+            if not isCurrent() or not inst.Parent then return end;
+            TweenService:Create(inst, TweenInfo.new(dur, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+                { Position = goal }):Play();
+        end);
+    end;
+
+    -- logo pops from its own centre
+    do
+        local goalSize, goalPos = Logo.Size, Logo.Position;
+        Logo.Size     = UDim2.fromOffset(0, 0);
+        Logo.Position = UDim2.fromOffset(goalPos.X.Offset + 17, goalPos.Y.Offset + 17);
+        task.delay(0.22, function()
+            if not isCurrent() or not Logo.Parent then return end;
+            TweenService:Create(Logo, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+                { Size = goalSize; Position = goalPos }):Play();
+        end);
+    end;
+
+    -- nav buttons, staggered
+    for i, n in ipairs({ "Main", "Rage", "Settings", "Credits" }) do
+        slideIn(navBtns[n], -28, 0, 0.26 + (i - 1) * 0.07, 0.55);
+    end;
+
+    -- main-page cards rise in
+    slideIn(modBody.Parent,  0, 22, 0.34, 0.6);
+    slideIn(tuneBody.Parent, 0, 22, 0.44, 0.6);
+
+    -- window itself
+    local t0 = tick();
+    while isCurrent() do
+        local a  = math.clamp((tick() - t0) / WIN_DUR, 0, 1);
+        local e  = easeOutQuint(a);
+        local sc = WIN_START_SCALE + (1 - WIN_START_SCALE) * e;
+        uiScale.Scale = sc;
+        MainFrame.GroupTransparency = 1 - easeOutCubic(math.clamp(a * 1.6, 0, 1));
+        MainFrame.Position = UDim2.new(
+            finalPos.X.Scale, finalPos.X.Offset + (1 - sc) * W / 2,
+            finalPos.Y.Scale, finalPos.Y.Offset + (1 - sc) * H / 2 + (1 - e) * WIN_RISE
+        );
+        if a >= 1 then break end;
+        RunService.Heartbeat:Wait();
+    end;
+    if not isCurrent() then return end;
+
+    uiScale.Scale = 1;
+    MainFrame.GroupTransparency = 0;
+    MainFrame.Position = restPos;
+    animating = false;
+    introDone = true;
+    task.delay(0.25, function()
+        if isCurrent() then
+            notify("Onyx v7 loaded", "Press " .. uiToggleKey.Name .. " to hide / show");
+        end;
+    end);
+end;
+
+applyCur();   -- paint every theme-driven control once with the default (Winter) palette
+
+task.spawn(function()
+    local holder: { frame: Instance? } = {};
+    pcall(playSplash, holder);
+    local splash = holder.frame;
+    if splash then pcall(function() splash:Destroy() end) end;
+    if not isCurrent() then return end;
+    playWindowIntro();
+end);
+
+-- ═══════════════════════════════════════
+-- CHARACTER SETUP
+-- ═══════════════════════════════════════
+local function setup(char)
+    if not isCurrent() then return end;
+    local hum = char:WaitForChild("Humanoid");
+    hum.AnimationPlayed:Connect(function(track)
+        if not isCurrent() then return end;
+        local animId = getId(track.Animation.AnimationId);
+        if Config.CooldownActive and Config.CooldownAnims[animId] then
+            startCooldown(5);
+        end;
+        if not Config.TouchMode and Config.Enabled then
+            if track.Animation.AnimationId == Config.LethalAnim then
+                executeLethal();
+            end;
+        end;
+    end);
+end;
+
+if lp.Character then setup(lp.Character) end;
+lp.CharacterAdded:Connect(setup);
